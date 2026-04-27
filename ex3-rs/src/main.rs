@@ -56,7 +56,7 @@ fn main() -> std::io::Result<()> {
         .collect::<Vec<_>>()
         .join(", ");
     println!(
-        "[{GREEN}+{RESET}] Finished solving! Elapsed: {:?} ms. Final loss: {f_err:e}. Resulting phases: \n{}",
+        "[{GREEN}+{RESET}] Finished solving! Elapsed: {:?}. Final loss: {f_err:e}. Resulting phases: \n{}",
         elapsed,
         format_array_real(&sol, 5)
     );
