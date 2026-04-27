@@ -1,0 +1,11 @@
+[package]
+name = "ex3-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+num-complex = "0.4"
+ndarray = "0.11"
+rand="0.10"
+bfgs="0.1"
+clap = { version = "4", features = ["derive"] }
