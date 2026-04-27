@@ -35,6 +35,14 @@ pub struct Args {
     /// Path for outputing the data formated to be drawn in gnuplot
     #[arg(short = 'D', long)]
     pub drawable: Option<PathBuf>,
+
+    /// Will retry until error func is below this value. This might not happen for some polynomials. By default it will just run once and always succeed.
+    #[arg(short='t', long, default_value_t = f64::MAX)]
+    pub tolerance: f64,
+
+    /// Will reseed for up to maxiter times
+    #[arg(short = 'i', long, default_value_t = 10)]
+    pub maxiter: usize,
 }
 
 pub fn parse_positive(s: &str) -> Result<usize, String> {
@@ -80,18 +88,11 @@ pub fn parse_target(s: &str) -> Result<Array1<Complex64>, String> {
         let n = parse_count(rest, "rand")?;
         let bool_dist = rand::distr::Bernoulli::new(0.5).unwrap();
         let numbers: Array1<Complex64> = (0..n)
-            .map(|_| {
-                if bool_dist.sample(&mut rng) {
-                    Complex64::new(1.0, 0.0)
-                } else {
-                    Complex64::new(0.0, 0.0)
-                }
-            })
+            .map(|_| { if bool_dist.sample(&mut rng) { 1. } else { 0. } }.into())
             .collect();
         return Ok(numbers);
     }
 
-    // Standard: kommagetrennte Liste
     let numbers: Array1<Complex64> = trimmed
         .split(',')
         .map(|part| {

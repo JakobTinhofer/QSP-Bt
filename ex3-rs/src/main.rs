@@ -1,6 +1,8 @@
 use crate::cli::{Args, BLUE, GREEN, RESET, format_array, format_array_real};
+use crate::solver::Parity;
 use clap::Parser;
 use ndarray::Array1;
+use num_complex::{Complex64, ComplexFloat};
 use std::time::Instant;
 use std::{fs::File, io::Write};
 
@@ -15,7 +17,20 @@ mod qsp;
 mod solver;
 
 fn main() -> std::io::Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+
+    if args.target_y[0].abs() <= 0.8 {
+        args.target_y[0] = (1.).into();
+    }
+    let t_len = args.target_y.len();
+    let goal_last: Complex64 = match args.parity {
+        Parity::Even => 1.,
+        Parity::Odd => 0.,
+    }
+    .into();
+    if (args.target_y[t_len - 1].abs() - goal_last.abs()).abs() > 0.2 {
+        args.target_y[t_len - 1] = goal_last;
+    }
 
     let target = TargetPoly::new_forced_parity(args.target_y, args.parity);
 
@@ -27,7 +42,13 @@ fn main() -> std::io::Result<()> {
     println!("y:\n{}", format_array(&target.ys, 3));
 
     let start = Instant::now();
-    let sol = solve_hotstart(&target, args.hotstart, args.degree);
+    let (sol, f_err) = solve_hotstart(
+        &target,
+        args.hotstart,
+        args.degree,
+        args.tolerance,
+        args.maxiter,
+    ).expect("Did not converge. Try increasing tolerance or max iter. Some polynomials might not converge at all.");
     let elapsed = start.elapsed();
     let sol_str = sol
         .iter()
@@ -35,7 +56,7 @@ fn main() -> std::io::Result<()> {
         .collect::<Vec<_>>()
         .join(", ");
     println!(
-        "[{GREEN}+{RESET}] Finished solving! Elapsed: {:?} ms. Result: \n{}",
+        "[{GREEN}+{RESET}] Finished solving! Elapsed: {:?} ms. Final loss: {f_err:e}. Resulting phases: \n{}",
         elapsed,
         format_array_real(&sol, 5)
     );

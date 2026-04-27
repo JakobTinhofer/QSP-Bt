@@ -96,46 +96,57 @@ pub fn grad_objective(phases: &[f64], target: &TargetPoly) -> Array1<f64> {
     grad
 }
 
-/*
-pub fn objective_mod(phases: &[f64], target: &TargetPoly) -> f64 {
-    target
-        .points_iter()
-        .zip(qsp_poly(phases, &target.xs))
-        .map(|((_, y), p)| (p.abs() - y.abs()).powf(2.))
-        .sum()
-}
-*/
-
-pub fn solve(target: &TargetPoly, degree: usize) -> Array1<f64> {
+pub fn solve(target: &TargetPoly, degree: usize) -> (Array1<f64>, f64) {
     let t_dist = Uniform::new(0., 2. * PI).expect("Failed to create random distribution!");
     let mut rng = rand::rng();
     let init_phases = (0..degree + 1)
         .map(|_| t_dist.sample(&mut rng))
         .collect::<Array1<f64>>();
-    bfgs(
+    let s = bfgs(
         init_phases,
         |p| objective(p.as_slice().unwrap(), target),
         |p| grad_objective(p.as_slice().unwrap(), target),
     )
-    .expect("Optimization failed!")
+    .expect("Optimization failed!");
+    let f_err = objective(s.as_slice().unwrap(), target);
+    (s, f_err)
 }
 
 pub fn solve_hotstart(
     target: &TargetPoly,
     hotstart_degree: usize,
     main_degree: usize,
-) -> Array1<f64> {
-    let initial = solve(target, hotstart_degree);
-    let t_dist = Uniform::new(0., 2. * PI).expect("Failed to create random distribution!");
-    let mut rng = rand::rng();
-    let random_pertub = (0..main_degree - hotstart_degree)
-        .map(|_| t_dist.sample(&mut rng))
-        .collect::<Array1<f64>>();
-    let padded = stack![Axis(0), initial, random_pertub];
-    bfgs(
-        padded,
-        |p| objective(p.as_slice().unwrap(), target),
-        |p| grad_objective(p.as_slice().unwrap(), target),
-    )
-    .expect("Optimize failed!")
+    retry_tolerance: f64,
+    max_iter: usize,
+) -> Result<(Array1<f64>, f64), String> {
+    let mut f_err = f64::MAX;
+    let mut i = 0;
+    let s = loop {
+        let (initial, _) = solve(target, hotstart_degree);
+        let t_dist = Uniform::new(0., 2. * PI).expect("Failed to create random distribution!");
+        let mut rng = rand::rng();
+        let random_pertub = (0..main_degree - hotstart_degree)
+            .map(|_| t_dist.sample(&mut rng))
+            .collect::<Array1<f64>>();
+        let padded = stack![Axis(0), initial, random_pertub];
+        let s = bfgs(
+            padded,
+            |p| objective(p.as_slice().unwrap(), target),
+            |p| grad_objective(p.as_slice().unwrap(), target),
+        )
+        .expect("Optimize failed!");
+        f_err = objective(s.as_slice().unwrap(), target);
+        if f_err <= retry_tolerance {
+            break s;
+        } else if i >= max_iter {
+            return Err(String::from("Maximum iterations reached"));
+        } else {
+            println!(
+                "[SOLVER]: Iter {i}/{max_iter} has a remaining error of {f_err:e}, which is larger than target tolerance {retry_tolerance:e}."
+            );
+            i += 1;
+        }
+    };
+
+    Ok((s, f_err))
 }
