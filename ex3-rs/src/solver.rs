@@ -33,7 +33,7 @@ impl TargetPoly {
             Parity::Odd => -1.,
         };
         for i in 0..n_half {
-            let t = theta_k(i, n_half);
+            let t = theta_k(i + 1, n_half);
             s.thetas[n_half + i] = t;
             s.thetas[n_half - i - 1] = PI - t;
             s.xs[n_half + i] = t.cos();
@@ -52,7 +52,8 @@ pub enum Parity {
 }
 
 fn theta_k(k: usize, n_half: usize) -> f64 {
-    return (((k as f64) / ((n_half - 1) as f64)) * (PI / 2.).powf(2.)).sqrt();
+    assert!(k > 0 && k <= n_half, "Range for k: 1..N_HALF");
+    return (((k as f64) / ((n_half + 1) as f64)) * (PI / 2.).powf(2.)).sqrt();
 }
 
 pub fn objective(phases: &[f64], target: &TargetPoly) -> f64 {
