@@ -117,37 +117,21 @@ pub fn solve_hotstart(
     target: &TargetPoly,
     hotstart_degree: usize,
     main_degree: usize,
-    retry_tolerance: f64,
-    max_iter: usize,
 ) -> Result<(Array1<f64>, f64), String> {
-    let mut f_err = f64::MAX;
-    let mut i = 0;
-    let s = loop {
-        let (initial, _) = solve(target, hotstart_degree);
-        let t_dist = Uniform::new(0., 2. * PI).expect("Failed to create random distribution!");
-        let mut rng = rand::rng();
-        let random_pertub = (0..main_degree - hotstart_degree)
-            .map(|_| t_dist.sample(&mut rng))
-            .collect::<Array1<f64>>();
-        let padded = stack![Axis(0), initial, random_pertub];
-        let s = bfgs(
-            padded,
-            |p| objective(p.as_slice().unwrap(), target),
-            |p| grad_objective(p.as_slice().unwrap(), target),
-        )
-        .expect("Optimize failed!");
-        f_err = objective(s.as_slice().unwrap(), target);
-        if f_err <= retry_tolerance {
-            break s;
-        } else if i >= max_iter {
-            return Err(String::from("Maximum iterations reached"));
-        } else {
-            println!(
-                "[SOLVER]: Iter {i}/{max_iter} has a remaining error of {f_err:e}, which is larger than target tolerance {retry_tolerance:e}."
-            );
-            i += 1;
-        }
-    };
+    let (initial, _) = solve(target, hotstart_degree);
+    let t_dist = Uniform::new(0., 2. * PI).expect("Failed to create random distribution!");
+    let mut rng = rand::rng();
+    let random_pertub = (0..main_degree - hotstart_degree)
+        .map(|_| t_dist.sample(&mut rng))
+        .collect::<Array1<f64>>();
+    let padded = stack![Axis(0), initial, random_pertub];
+    let s = bfgs(
+        padded,
+        |p| objective(p.as_slice().unwrap(), target),
+        |p| grad_objective(p.as_slice().unwrap(), target),
+    )
+    .expect("Optimize failed!");
+    let f_err = objective(s.as_slice().unwrap(), target);
 
     Ok((s, f_err))
 }
