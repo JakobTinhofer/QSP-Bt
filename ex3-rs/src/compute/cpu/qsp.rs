@@ -1,5 +1,7 @@
-use crate::c2x2::C2x2;
+use ndarray::Array1;
 use num_complex::Complex64;
+
+use crate::compute::cpu::c2x2::C2x2;
 
 pub fn signal_operator(x: f64) -> C2x2 {
     let t = x.acos();
@@ -24,7 +26,7 @@ pub fn qsp_unitary(phases: &[f64], x: f64) -> C2x2 {
     u
 }
 
-pub fn qsp_poly(phases: &[f64], xs: &[f64]) -> Vec<Complex64> {
+pub fn qsp_poly(phases: &[f64], xs: &[f64]) -> Array1<Complex64> {
     xs.iter()
         .map(|x| qsp_unitary(phases, *x).get(0, 0))
         .collect()

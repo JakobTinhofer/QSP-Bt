@@ -1,7 +1,4 @@
-use crate::{
-    c2x2::C2x2,
-    qsp::{qsp_poly, signal_operator, z_rotation},
-};
+use crate::compute::ComputeBackend;
 use bfgs::bfgs;
 use clap::ValueEnum;
 use ndarray::{Array1, Axis, stack};
@@ -56,48 +53,7 @@ fn theta_k(k: usize, n_half: usize) -> f64 {
     return (((k as f64) / ((n_half + 1) as f64)) * (PI / 2.).powf(2.)).sqrt();
 }
 
-pub fn objective(phases: &[f64], target: &TargetPoly) -> f64 {
-    target
-        .points_iter()
-        .zip(qsp_poly(phases, &target.xs.as_slice().unwrap()))
-        .map(|((_, y), p)| (p.re - y.re).powf(2.) + (p.im - y.im).powf(2.))
-        .sum()
-}
-
-pub fn grad_objective(phases: &[f64], target: &TargetPoly) -> Array1<f64> {
-    let d = phases.len() - 1;
-    let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
-    let mut grad = Array1::zeros(d + 1);
-    let mut left_side = vec![C2x2::empty(); d + 1];
-    let mut right_side = vec![C2x2::empty(); d + 1];
-    for (x, f) in target.points_iter() {
-        let wx = signal_operator(*x);
-        left_side[0] = r_z[0];
-        right_side[d] = C2x2::eye();
-        for k in 1..d + 1 {
-            left_side[k] = left_side[k - 1] * wx * r_z[k];
-            right_side[d - k] = wx * r_z[d - k + 1] * right_side[d - k + 1];
-        }
-
-        let u = left_side[d];
-        let r = u.get(0, 0) - f;
-        let pauli_z_i2 = C2x2::new([
-            [Complex64::new(0., 0.5), (0.).into()],
-            [(0.).into(), Complex64::new(0., -0.5).into()],
-        ]);
-        for k in 0..d + 1 {
-            let m = if k == 0 {
-                pauli_z_i2 * u
-            } else {
-                left_side[k - 1] * wx * pauli_z_i2 * r_z[k] * right_side[k]
-            };
-            grad[k] += 2. * (r.conj() * m.get(0, 0)).re;
-        }
-    }
-    grad
-}
-
-pub fn solve(target: &TargetPoly, degree: usize) -> (Array1<f64>, f64) {
+pub fn solve<T: ComputeBackend>(backend: &T, degree: usize) -> (Array1<f64>, f64) {
     let t_dist = Uniform::new(0., 2. * PI).expect("Failed to create random distribution!");
     let mut rng = rand::rng();
     let init_phases = (0..degree + 1)
@@ -105,20 +61,20 @@ pub fn solve(target: &TargetPoly, degree: usize) -> (Array1<f64>, f64) {
         .collect::<Array1<f64>>();
     let s = bfgs(
         init_phases,
-        |p| objective(p.as_slice().unwrap(), target),
-        |p| grad_objective(p.as_slice().unwrap(), target),
+        |p| backend.evaluate_f(p),
+        |p| backend.evaluate_both(p).1,
     )
     .expect("Optimization failed!");
-    let f_err = objective(s.as_slice().unwrap(), target);
+    let f_err = backend.evaluate_f(&s);
     (s, f_err)
 }
 
-pub fn solve_hotstart(
-    target: &TargetPoly,
+pub fn solve_hotstart<T: ComputeBackend>(
+    backend: &T,
     hotstart_degree: usize,
     main_degree: usize,
 ) -> Result<(Array1<f64>, f64), String> {
-    let (initial, _) = solve(target, hotstart_degree);
+    let (initial, _) = solve(backend, hotstart_degree);
     let t_dist = Uniform::new(0., 2. * PI).expect("Failed to create random distribution!");
     let mut rng = rand::rng();
     let random_pertub = (0..main_degree - hotstart_degree)
@@ -127,11 +83,11 @@ pub fn solve_hotstart(
     let padded = stack![Axis(0), initial, random_pertub];
     let s = bfgs(
         padded,
-        |p| objective(p.as_slice().unwrap(), target),
-        |p| grad_objective(p.as_slice().unwrap(), target),
+        |p| backend.evaluate_f(p),
+        |p| backend.evaluate_both(p).1,
     )
     .expect("Optimize failed!");
-    let f_err = objective(s.as_slice().unwrap(), target);
+    let f_err = backend.evaluate_f(&s);
 
     Ok((s, f_err))
 }
