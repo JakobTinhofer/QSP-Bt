@@ -2,18 +2,21 @@ use ndarray::Array1;
 use num_complex::Complex64;
 
 use crate::compute::cpu::c2x2::C2x2;
-
+#[inline(always)]
 pub fn signal_operator(x: f64) -> C2x2 {
-    let t = x.acos();
-    return C2x2::new([
-        [t.cos().into(), Complex64::new(0., t.sin())],
-        [Complex64::new(0., t.sin()), t.cos().into()],
-    ]);
+    let s = (1.0 - x * x).max(0.0).sqrt();
+    C2x2::new([
+        [x.into(), Complex64::new(0., s)],
+        [Complex64::new(0., s), x.into()],
+    ])
 }
-
+#[inline(always)]
 pub fn z_rotation(phi: f64) -> C2x2 {
-    let arg = Complex64::new(0., phi / 2.);
-    return C2x2::new([[arg.exp(), (0.).into()], [(0.).into(), (-arg).exp()]]);
+    let h = phi * 0.5;
+    let (s, c) = h.sin_cos();
+    let z_pos = Complex64::new(c, s);
+    let z_neg = Complex64::new(c, -s);
+    C2x2::new([[z_pos, Complex64::ZERO], [Complex64::ZERO, z_neg]])
 }
 
 pub fn qsp_unitary(phases: &[f64], x: f64) -> C2x2 {

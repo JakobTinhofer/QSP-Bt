@@ -24,13 +24,13 @@ impl C2x2 {
         }
     }
 
+    #[inline(always)]
     pub fn at(&mut self, i: usize, j: usize) -> &mut Complex64 {
-        assert!(i < 2 && j < 2, "Invalid index!");
         &mut self.inner[i][j]
     }
 
+    #[inline(always)]
     pub fn get(&self, i: usize, j: usize) -> Complex64 {
-        assert!(i < 2 && j < 2, "Invalid index!");
         self.inner[i][j]
     }
 
@@ -74,7 +74,7 @@ impl C2x2 {
 
 impl Add<C2x2> for C2x2 {
     type Output = C2x2;
-
+    #[inline(always)]
     fn add(self, rhs: C2x2) -> Self::Output {
         let mut c: C2x2 = C2x2::empty();
         for i in 0..2 {
@@ -88,7 +88,7 @@ impl Add<C2x2> for C2x2 {
 
 impl Sub<C2x2> for C2x2 {
     type Output = C2x2;
-
+    #[inline(always)]
     fn sub(self, rhs: C2x2) -> Self::Output {
         let mut c: C2x2 = C2x2::empty();
         for i in 0..2 {
@@ -102,16 +102,21 @@ impl Sub<C2x2> for C2x2 {
 
 impl Mul<C2x2> for C2x2 {
     type Output = C2x2;
-
+    #[inline(always)]
     fn mul(self, rhs: C2x2) -> Self::Output {
-        let mut c: C2x2 = C2x2::empty();
-        for i in 0..2 {
-            for j in 0..2 {
-                for k in 0..2 {
-                    *c.at(i, j) = c.get(i, j) + self.get(i, k) * rhs.get(k, j);
-                }
-            }
+        let a = &self.inner;
+        let b = &rhs.inner;
+        C2x2 {
+            inner: [
+                [
+                    a[0][0] * b[0][0] + a[0][1] * b[1][0],
+                    a[0][0] * b[0][1] + a[0][1] * b[1][1],
+                ],
+                [
+                    a[1][0] * b[0][0] + a[1][1] * b[1][0],
+                    a[1][0] * b[0][1] + a[1][1] * b[1][1],
+                ],
+            ],
         }
-        c
     }
 }

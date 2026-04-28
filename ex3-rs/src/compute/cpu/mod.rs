@@ -43,7 +43,7 @@ impl ComputeBackend for CpuComputeBackend {
 
             let u = left_side[d];
             let r = u.get(0, 0) - f;
-            loss += r.abs().powf(2.);
+            loss += r.norm_sqr();
 
             let pauli_z_i2 = C2x2::new([
                 [Complex64::new(0., 0.5), (0.).into()],
