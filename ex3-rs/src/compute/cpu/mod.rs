@@ -1,5 +1,5 @@
-mod c2x2;
-mod qsp;
+pub mod c2x2;
+pub mod qsp;
 use ndarray::Array1;
 use num_complex::{Complex64, ComplexFloat};
 

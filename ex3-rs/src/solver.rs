@@ -18,6 +18,11 @@ impl TargetPoly {
         self.xs.iter().zip(self.ys.iter())
     }
 
+    pub fn from_parts(xs: Array1<f64>, ys: Array1<Complex64>) -> Self {
+        let thetas = xs.mapv(|x| x.acos());
+        Self { xs, ys, thetas }
+    }
+
     pub fn new_forced_parity(target_y_half: Array1<Complex64>, parity: Parity) -> Self {
         let n_half = target_y_half.len();
         let mut s = Self {

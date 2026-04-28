@@ -1,16 +1,11 @@
-use crate::cli::{Args, BLUE, GREEN, RESET, format_array, format_array_real};
-use crate::compute::ComputeBackend;
-use crate::compute::cpu::CpuComputeBackend;
 use clap::Parser;
+use ex3_rs::cli::{Args, BLUE, GREEN, RESET, format_array, format_array_real};
+use ex3_rs::compute::ComputeBackend;
+use ex3_rs::compute::cpu::CpuComputeBackend;
+use ex3_rs::solver::{TargetPoly, solve_hotstart};
 use ndarray::Array1;
 use std::time::Instant;
 use std::{fs::File, io::Write};
-
-use crate::solver::{TargetPoly, solve_hotstart};
-
-mod cli;
-mod compute;
-mod solver;
 
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
