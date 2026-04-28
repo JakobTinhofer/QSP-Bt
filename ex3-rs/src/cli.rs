@@ -37,10 +37,10 @@ pub struct Args {
     pub drawable: Option<PathBuf>,
 
     /// Will retry until error func is below this value. This might not happen for some polynomials. By default it will just run once and always succeed.
-    #[arg(short='t', long, default_value_t = f64::MAX)]
-    pub tolerance: f64,
+    #[arg(short = 't', long)]
+    pub tolerance: Option<f64>,
 
-    /// Will reseed for up to maxiter times
+    /// Will reseed for up to maxiter times as long as tolerance is not reached.
     #[arg(short = 'i', long, default_value_t = 10)]
     pub maxiter: usize,
 }

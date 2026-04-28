@@ -46,7 +46,7 @@ fn main() -> std::io::Result<()> {
         &target,
         args.hotstart,
         args.degree,
-        args.tolerance,
+        args.tolerance.unwrap_or(f64::MAX),
         args.maxiter,
     ).expect("Did not converge. Try increasing tolerance or max iter. Some polynomials might not converge at all.");
     let elapsed = start.elapsed();
