@@ -101,7 +101,8 @@ fn bench_evaluate_both(c: &mut Criterion) {
     group.measurement_time(std::time::Duration::from_secs(15));
     for &(i_count, n) in &[(50_usize, 50_usize), (500, 2000)] {
         let target = make_target(i_count);
-        let backend = CpuComputeBackend::new(target);
+        let backend =
+            CpuComputeBackend::new(target, ex3_rs::compute::cpu::BackendMode::MultiThread);
         let phases = make_phases(n);
 
         group.bench_with_input(

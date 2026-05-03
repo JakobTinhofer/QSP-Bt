@@ -76,13 +76,14 @@ impl Add<C2x2> for C2x2 {
     type Output = C2x2;
     #[inline(always)]
     fn add(self, rhs: C2x2) -> Self::Output {
-        let mut c: C2x2 = C2x2::empty();
-        for i in 0..2 {
-            for j in 0..2 {
-                *c.at(i, j) = self.get(i, j) + rhs.get(i, j);
-            }
+        let a = &self.inner;
+        let b = &rhs.inner;
+        C2x2 {
+            inner: [
+                [a[0][0] + b[0][0], a[0][1] + b[0][1]],
+                [a[1][0] + b[1][0], a[1][1] + b[1][1]],
+            ],
         }
-        c
     }
 }
 
@@ -90,13 +91,14 @@ impl Sub<C2x2> for C2x2 {
     type Output = C2x2;
     #[inline(always)]
     fn sub(self, rhs: C2x2) -> Self::Output {
-        let mut c: C2x2 = C2x2::empty();
-        for i in 0..2 {
-            for j in 0..2 {
-                *c.at(i, j) = self.get(i, j) - rhs.get(i, j);
-            }
+        let a = &self.inner;
+        let b = &rhs.inner;
+        C2x2 {
+            inner: [
+                [a[0][0] - b[0][0], a[0][1] - b[0][1]],
+                [a[1][0] - b[1][0], a[1][1] - b[1][1]],
+            ],
         }
-        c
     }
 }
 

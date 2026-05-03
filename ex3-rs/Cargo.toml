@@ -5,16 +5,16 @@ edition = "2024"
 
 [dependencies]
 num-complex = "0.4"
-ndarray = "0.11"
+ndarray = "0.16"
+argmin = "0.11"
+argmin-math = { version = "0.5", features = ["ndarray_v0_16-nolinalg"] }
 rand="0.10"
-bfgs="0.1"
 clap = { version = "4", features = ["derive"] }
+rayon = "1"
+
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-rand = "0.10"
-ndarray = "0.11"
-num-complex = "0.4"
 
 [[bench]]
 name = "qsp_bench"

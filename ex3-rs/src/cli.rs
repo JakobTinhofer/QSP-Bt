@@ -1,49 +1,130 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use ndarray::Array1;
 use num_complex::Complex64;
 use rand::distr::{Distribution, Uniform};
 use std::f64::consts::TAU;
 use std::path::PathBuf;
 
-use crate::solver::Parity;
+use crate::compute::cpu::BackendMode;
+use crate::solver::{Parity, SolveMode};
+
+#[derive(Subcommand)]
+pub enum Task {
+    SolvePoly {
+        /// complex numbers with mod <= 1 seperated by commas (eg "0.5+0.3i, -0.2-0.7i, 0.1i") or
+        /// "rand,n": initializes with n points that are either 1 or 0 (which are then mirrored, see parity)
+        /// "rand-phase,n" initializes with n points that are like exp(iφ) with random φ ∈ [0, 2π)
+        #[arg(value_parser = parse_target)]
+        target_y: Array1<Complex64>,
+
+        /// parity ("even" or "odd")
+        #[arg(short = 'p', long, value_enum, default_value_t = Parity::Even)]
+        parity: Parity,
+
+        /// Path for the solution output
+        #[arg(short = 'o', long)]
+        output: Option<PathBuf>,
+
+        /// Path for outputing the data formated to be drawn in gnuplot
+        #[arg(short = 'D', long)]
+        drawable: Option<PathBuf>,
+    },
+    PlotRuntimes {
+        /// Cutoff runtime in seconds
+        #[arg(short = 'r', long, default_value = "180")]
+        max_runtime: usize,
+
+        /// How large to make the steps between different tries
+        #[arg(short = 'l', long, default_value = "5")]
+        target_len_step: usize,
+
+        /// How many phase parameters to use per point of the target
+        #[arg(short = 'R', long, default_value = "4")]
+        ratio_phases_to_target: f64,
+
+        #[arg(short = 'n', long, default_value = "3")]
+        avg_n: usize,
+    },
+}
 
 #[derive(Parser)]
 #[command(about = "Fit a QSP polynomial to the given sequence of target points.")]
 pub struct Args {
-    /// complex numbers with mod <= 1 seperated by commas (eg "0.5+0.3i, -0.2-0.7i, 0.1i") or
-    /// "rand,n": initializes with n points that are either 1 or 0 (which are then mirrored, see parity)
-    /// "rand-phase,n" initializes with n points that are like exp(iφ) with random φ ∈ [0, 2π)
-    #[arg(value_parser = parse_target)]
-    pub target_y: Array1<Complex64>,
+    ///which task to execute. Will solve given poly be default.
+    #[command(subcommand)]
+    pub task: Task,
 
-    /// degree (>0)
-    #[arg(short = 'd', long, value_parser = parse_positive, default_value_t=60)]
-    pub degree: usize,
+    /// Enable/disable multithreading for gradient, lossfunction evaluation. Auto: will do single threading for small d & short sequences. (both <= 100)
+    #[arg(short = 'm', long, value_enum, default_value_t = BackendMode::Auto)]
+    pub backend_mode: BackendMode,
 
-    /// hotstart-degree (>0)
-    #[arg(short = 's', long, value_parser = parse_positive, default_value_t=20)]
-    pub hotstart: usize,
+    /// Solve mode: "simple,D" — direct solve at degree D
+    ///             "hotstart,S,D" — solve at degree S, then continue at degree D
+    ///             "cascade,N,D" — N cascading steps up to degree D
+    /// if running PlotRuntimes task, this will be interpreted as a ratio and scaled accordingly
+    #[arg(short = 'M', long, value_parser = parse_solve_mode, default_value = "hotstart,20,60")]
+    pub mode: SolveMode,
 
-    /// parity ("even" or "odd")
-    #[arg(short = 'p', long, value_enum, default_value_t = Parity::Even)]
-    pub parity: Parity,
+    /// Any L-BFGS call will only go up to this number of iters. Will break when this is reached and display a debug message.
+    #[arg(short = 'i', long, default_value = "500000")]
+    pub lbfgs_max_iters: u64,
 
-    /// Path for the solution output
-    #[arg(short = 'o', long)]
-    pub output: Option<PathBuf>,
+    /// If the local change is smaller than this tolerance, break
+    #[arg(short = 't', long, default_value = "1e-8")]
+    pub tol_grad: f64,
 
-    /// Path for outputing the data formated to be drawn in gnuplot
-    #[arg(short = 'D', long)]
-    pub drawable: Option<PathBuf>,
-    /*
-    /// Will retry until error func is below this value. This might not happen for some polynomials. By default it will just run once and always succeed.
-    #[arg(short = 't', long)]
-    pub tolerance: Option<f64>,
+    /// Memory for L-BFGS
+    #[arg(long, default_value = "10")]
+    pub lbfgs_mem: usize,
+}
 
-    /// Will reseed for up to maxiter times as long as tolerance is not reached.
-    #[arg(short = 'i', long, default_value_t = 10)]
-    pub maxiter: usize,
-    */
+pub fn parse_solve_mode(s: &str) -> Result<SolveMode, String> {
+    let trimmed = s.trim();
+
+    if let Some(rest) = trimmed.strip_prefix("simple,") {
+        let d = parse_positive(rest.trim())?;
+        return Ok(SolveMode::Simple(d));
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("hotstart,") {
+        let parts: Vec<&str> = rest.split(',').collect();
+        if parts.len() != 2 {
+            return Err(format!(
+                "hotstart: expected 'hotstart,S,D' but got '{}'",
+                trimmed
+            ));
+        }
+        let s_deg = parse_positive(parts[0].trim())?;
+        let d_deg = parse_positive(parts[1].trim())?;
+        if s_deg >= d_deg {
+            return Err(format!(
+                "hotstart: hotstart degree ({}) must be < final degree ({})",
+                s_deg, d_deg
+            ));
+        }
+        return Ok(SolveMode::Hotstart(s_deg, d_deg));
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("cascade,") {
+        let parts: Vec<&str> = rest.split(',').collect();
+        if parts.len() != 2 {
+            return Err(format!(
+                "cascade: expected 'cascade,N,D' but got '{}'",
+                trimmed
+            ));
+        }
+        let n_steps = parse_positive(parts[0].trim())?;
+        let d_deg = parse_positive(parts[1].trim())?;
+        if n_steps < 2 {
+            return Err("cascade: N must be >= 2".into());
+        }
+        return Ok(SolveMode::Cascade(n_steps, d_deg));
+    }
+
+    Err(format!(
+        "Unknown solve mode '{}'. Expected one of: simple,D | hotstart,S,D | cascade,N,D",
+        trimmed
+    ))
 }
 
 pub fn parse_positive(s: &str) -> Result<usize, String> {
