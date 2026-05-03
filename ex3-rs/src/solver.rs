@@ -22,6 +22,13 @@ impl TargetPoly {
         self.xs.iter().zip(self.ys.iter())
     }
 
+    pub fn xs_ys(&self) -> (&[f64], &[Complex64]) {
+        (
+            self.xs.as_slice().expect("xs must be contiguous"),
+            self.ys.as_slice().expect("ys must be contiguous"),
+        )
+    }
+
     pub fn from_parts(xs: Array1<f64>, ys: Array1<Complex64>) -> Self {
         let thetas = xs.mapv(|x| x.acos());
         Self { xs, ys, thetas }

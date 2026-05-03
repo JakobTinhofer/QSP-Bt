@@ -77,83 +77,91 @@ impl ComputeBackend for CpuComputeBackend {
         {
             return self.evaluate_both_st(phases);
         }
-
         use rayon::prelude::*;
 
         let d = phases.len() - 1;
         let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
-
-        let half_i = Complex64::new(0., 0.5);
+        let half_i = Complex64::new(0.0, 0.5);
         let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
         let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
 
-        let points: Vec<(f64, Complex64)> =
-            self.target.points_iter().map(|(x, y)| (*x, *y)).collect();
+        let (xs, ys) = self.target.xs_ys();
 
-        let (loss, g) = points
+        let n = d + 1;
+
+        let (loss, g) = xs
             .par_iter()
-            .map(|(x, f)| {
-                let s = (1.0 - x * x).max(0.0).sqrt();
-                let x = *x;
+            .zip(ys.par_iter())
+            .map_init(
+                || {
+                    (
+                        vec![C2x2::empty(); n],  // left_side
+                        vec![C2x2::empty(); n],  // right_side
+                        vec![C2x2::empty(); n],  // m_pre (index 0 unused)
+                        Array1::<f64>::zeros(n), // g_local
+                    )
+                },
+                |(left_side, right_side, m_pre, g_local), (x, f)| {
+                    let x = *x;
+                    let s = (1.0 - x * x).max(0.0).sqrt();
 
-                let mut left_side = vec![C2x2::empty(); d + 1];
-                let mut right_side = vec![C2x2::empty(); d + 1];
-                let mut m_pre = vec![C2x2::empty(); d + 1];
+                    for k in 1..=d {
+                        let a = r_z[k].get(0, 0);
+                        let b = r_z[k].get(1, 1);
+                        m_pre[k] = C2x2::new([
+                            [
+                                Complex64::new(x * a.re, x * a.im),
+                                Complex64::new(-s * b.im, s * b.re),
+                            ],
+                            [
+                                Complex64::new(-s * a.im, s * a.re),
+                                Complex64::new(x * b.re, x * b.im),
+                            ],
+                        ]);
+                    }
 
-                for k in 0..d + 1 {
-                    let a = r_z[k].get(0, 0);
-                    let b = r_z[k].get(1, 1);
-                    m_pre[k] = C2x2::new([
-                        [
-                            Complex64::new(x * a.re, x * a.im),
-                            Complex64::new(-s * b.im, s * b.re),
-                        ],
-                        [
-                            Complex64::new(-s * a.im, s * a.re),
-                            Complex64::new(x * b.re, x * b.im),
-                        ],
-                    ]);
-                }
+                    left_side[0] = r_z[0];
+                    right_side[d] = C2x2::eye();
+                    for k in 1..=d {
+                        left_side[k] = left_side[k - 1] * m_pre[k];
+                        right_side[d - k] = m_pre[d - k + 1] * right_side[d - k + 1];
+                    }
 
-                left_side[0] = r_z[0];
-                right_side[d] = C2x2::eye();
-                for k in 1..d + 1 {
-                    left_side[k] = left_side[k - 1] * m_pre[k];
-                    right_side[d - k] = m_pre[d - k + 1] * right_side[d - k + 1];
-                }
+                    let u = left_side[d];
+                    let r = u.get(0, 0) - f;
+                    let loss_term = r.norm_sqr();
+                    let r_conj = r.conj();
 
-                let u = left_side[d];
-                let r = u.get(0, 0) - f;
-                let loss_term = r.norm_sqr();
+                    let m00_0 = half_i * u.get(0, 0);
+                    g_local[0] = 2.0 * (r_conj * m00_0).re;
 
-                let mut g_local = Array1::<f64>::zeros(d + 1);
-                let m00 = half_i * u.get(0, 0);
-                g_local[0] = 2.0 * (r.conj() * m00).re;
+                    for k in 1..=n - 1 {
+                        let l00 = left_side[k - 1].get(0, 0);
+                        let l01 = left_side[k - 1].get(0, 1);
+                        let r00 = right_side[k].get(0, 0);
+                        let r10 = right_side[k].get(1, 0);
 
-                let r_conj = r.conj();
-                for k in 1..d + 1 {
-                    let l00 = left_side[k - 1].get(0, 0);
-                    let l01 = left_side[k - 1].get(0, 1);
-                    let r00 = right_side[k].get(0, 0);
-                    let r10 = right_side[k].get(1, 0);
+                        let xl00 = Complex64::new(x * l00.re, x * l00.im);
+                        let xl01 = Complex64::new(x * l01.re, x * l01.im);
+                        let is_l00 = Complex64::new(-s * l00.im, s * l00.re);
+                        let is_l01 = Complex64::new(-s * l01.im, s * l01.re);
 
-                    let xl00 = Complex64::new(x * l00.re, x * l00.im);
-                    let xl01 = Complex64::new(x * l01.re, x * l01.im);
-                    let is_l00 = Complex64::new(-s * l00.im, s * l00.re);
-                    let is_l01 = Complex64::new(-s * l01.im, s * l01.re);
+                        let a_term = xl00 + is_l01;
+                        let b_term = is_l00 + xl01;
 
-                    let a_term = xl00 + is_l01;
-                    let b_term = is_l00 + xl01;
+                        let m00 = alphas[k] * r00 * a_term + betas[k] * r10 * b_term;
+                        g_local[k] = 2.0 * (r_conj * m00).re;
+                    }
 
-                    let m00 = alphas[k] * r00 * a_term + betas[k] * r10 * b_term;
-                    g_local[k] = 2.0 * (r_conj * m00).re;
-                }
-
-                (loss_term, g_local)
-            })
+                    (loss_term, g_local.clone())
+                },
+            )
             .reduce(
-                || (0.0_f64, Array1::<f64>::zeros(d + 1)),
-                |(la, ga), (lb, gb)| (la + lb, ga + gb),
+                || (0.0_f64, Array1::<f64>::zeros(n)),
+                |(la, mut ga), (lb, gb)| {
+                    ga += &gb;
+                    (la + lb, ga)
+                },
             );
 
         (loss, g)
