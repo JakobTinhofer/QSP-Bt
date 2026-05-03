@@ -1,3 +1,4 @@
 pub mod cli;
 pub mod compute;
-pub mod solver;
+pub mod solvers;
+pub mod target;

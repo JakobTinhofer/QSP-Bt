@@ -11,6 +11,7 @@ argmin-math = { version = "0.5", features = ["ndarray_v0_16-nolinalg"] }
 rand="0.10"
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
+levenberg-marquardt = "0.15"
 
 
 [dev-dependencies]

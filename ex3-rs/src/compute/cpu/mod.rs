@@ -1,7 +1,7 @@
 pub mod c2x2;
 pub mod qsp;
 use clap::ValueEnum;
-use ndarray::Array1;
+use ndarray::{Array1, Array2};
 use num_complex::{Complex64, ComplexFloat};
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
             qsp::{qsp_poly, z_rotation},
         },
     },
-    solver::TargetPoly,
+    target::TargetPoly,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -27,9 +27,95 @@ pub struct CpuComputeBackend {
     mode: BackendMode,
 }
 
+struct PointScratch {
+    left_side: Vec<C2x2>,
+    right_side: Vec<C2x2>,
+    m_pre: Vec<C2x2>,
+    m00s: Array1<Complex64>,
+}
+
+impl PointScratch {
+    pub fn new(n: usize) -> Self {
+        Self {
+            left_side: vec![C2x2::empty(); n],
+            right_side: vec![C2x2::empty(); n],
+            m_pre: vec![C2x2::empty(); n],
+            m00s: Array1::<Complex64>::zeros(n),
+        }
+    }
+}
+
 impl CpuComputeBackend {
     pub fn new(p: TargetPoly, mode: BackendMode) -> Self {
         Self { target: p, mode }
+    }
+
+    fn eval_point(
+        &self,
+        x: f64,
+        f: Complex64,
+        r_z: &[C2x2],
+        alphas: &[Complex64],
+        betas: &[Complex64],
+        scratch: &mut PointScratch,
+    ) -> (Complex64, Array1<Complex64>) {
+        let n = r_z.len();
+        let d = n - 1;
+        let s = (1.0 - x * x).max(0.0).sqrt();
+        let half_i = Complex64::new(0.0, 0.5);
+
+        let PointScratch {
+            left_side,
+            right_side,
+            m_pre,
+            m00s,
+        } = scratch;
+
+        for k in 1..=d {
+            let a = r_z[k].get(0, 0);
+            let b = r_z[k].get(1, 1);
+            m_pre[k] = C2x2::new([
+                [
+                    Complex64::new(x * a.re, x * a.im),
+                    Complex64::new(-s * b.im, s * b.re),
+                ],
+                [
+                    Complex64::new(-s * a.im, s * a.re),
+                    Complex64::new(x * b.re, x * b.im),
+                ],
+            ]);
+        }
+
+        left_side[0] = r_z[0];
+        right_side[d] = C2x2::eye();
+        for k in 1..=d {
+            left_side[k] = left_side[k - 1] * m_pre[k];
+            right_side[d - k] = m_pre[d - k + 1] * right_side[d - k + 1];
+        }
+
+        let u = left_side[d];
+        let r = u.get(0, 0) - f;
+
+        m00s[0] = half_i * u.get(0, 0);
+
+        for k in 1..=d {
+            let l00 = left_side[k - 1].get(0, 0);
+            let l01 = left_side[k - 1].get(0, 1);
+            let r00 = right_side[k].get(0, 0);
+            let r10 = right_side[k].get(1, 0);
+
+            let xl00 = Complex64::new(x * l00.re, x * l00.im);
+            let xl01 = Complex64::new(x * l01.re, x * l01.im);
+            let is_l00 = Complex64::new(-s * l00.im, s * l00.re);
+            let is_l01 = Complex64::new(-s * l01.im, s * l01.re);
+
+            let a_term = xl00 + is_l01;
+            let b_term = is_l00 + xl01;
+
+            m00s[k] = alphas[k] * r00 * a_term + betas[k] * r10 * b_term;
+        }
+
+        (r, m00s.clone())
     }
 
     fn evaluate_both_st(&self, phases: &Array1<f64>) -> (f64, Array1<f64>) {
@@ -70,7 +156,43 @@ impl CpuComputeBackend {
 }
 
 impl ComputeBackend for CpuComputeBackend {
-    fn evaluate_both(&self, phases: &Array1<f64>) -> (f64, Array1<f64>) {
+    fn evaluate_res_jac(&self, phases: &Array1<f64>) -> (Array1<f64>, Array2<f64>) {
+        use rayon::prelude::*;
+
+        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
+        let half_i = Complex64::new(0.0, 0.5);
+        let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
+        let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
+
+        let (xs, ys) = self.target.xs_ys();
+        let n = phases.len();
+        let n_points = self.target.xs.len();
+
+        let results: Vec<(Complex64, Array1<Complex64>)> = xs
+            .par_iter()
+            .zip(ys.par_iter())
+            .map_init(
+                || PointScratch::new(n),
+                |scratch, (x, f)| self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch),
+            )
+            .collect();
+
+        let mut residuals = Array1::<f64>::zeros(2 * n_points);
+        let mut jacobian = Array2::<f64>::zeros((2 * n_points, n));
+
+        for (p, (r, m00s)) in results.into_iter().enumerate() {
+            residuals[2 * p] = r.re;
+            residuals[2 * p + 1] = r.im;
+            for k in 0..n {
+                jacobian[[2 * p, k]] = m00s[k].re;
+                jacobian[[2 * p + 1, k]] = m00s[k].im;
+            }
+        }
+
+        (residuals, jacobian)
+    }
+
+    fn evaluate_f_grad(&self, phases: &Array1<f64>) -> (f64, Array1<f64>) {
         if self.mode == BackendMode::SingleThread
             || self.mode == BackendMode::Auto
                 && (phases.len() <= 100 && self.target.xs.len() <= 100)
@@ -79,16 +201,17 @@ impl ComputeBackend for CpuComputeBackend {
         }
         use rayon::prelude::*;
 
-        let d = phases.len() - 1;
         let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
         let half_i = Complex64::new(0.0, 0.5);
         let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
         let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
+        let d = phases.len() - 1;
 
         let (xs, ys) = self.target.xs_ys();
 
         let n = d + 1;
 
+        // TODO: Use eval_point
         let (loss, g) = xs
             .par_iter()
             .zip(ys.par_iter())
@@ -193,7 +316,7 @@ impl ComputeBackend for CpuComputeBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::TargetPoly;
+    use crate::target::TargetPoly;
     use ndarray::Array1;
     use num_complex::Complex64;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -227,7 +350,7 @@ mod tests {
             for seed in 0u64..5 {
                 let phases = random_phases(n, seed);
 
-                let (loss_new, grad_new) = backend.evaluate_both(&phases);
+                let (loss_new, grad_new) = backend.evaluate_f_grad(&phases);
                 let (loss_ref, grad_ref) = backend.evaluate_both_st(&phases);
 
                 let loss_diff = (loss_new - loss_ref).abs();
@@ -271,7 +394,7 @@ mod tests {
         for &n in &[4_usize, 12] {
             for seed in 0u64..3 {
                 let phases = random_phases(n, seed);
-                let (_, grad_analytic) = backend.evaluate_both(&phases);
+                let (_, grad_analytic) = backend.evaluate_f_grad(&phases);
 
                 // Central differences: g[k] ≈ (f(phi + h*e_k) - f(phi - h*e_k)) / (2h)
                 // h chosen as compromise between truncation (O(h^2)) and roundoff (O(eps/h)).

@@ -1,5 +1,6 @@
 // benches/qsp_bench.rs
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use ex3_rs::target::TargetPoly;
 use ndarray::Array1;
 use num_complex::Complex64;
 use rand::RngExt;
@@ -10,7 +11,6 @@ use ex3_rs::compute::ComputeBackend;
 use ex3_rs::compute::cpu::CpuComputeBackend;
 use ex3_rs::compute::cpu::c2x2::C2x2;
 use ex3_rs::compute::cpu::qsp::{signal_operator, z_rotation};
-use ex3_rs::solver::TargetPoly;
 
 // ---------- Test fixtures ----------
 
@@ -110,7 +110,7 @@ fn bench_evaluate_both(c: &mut Criterion) {
             &(backend, phases),
             |b, (backend, phases)| {
                 b.iter(|| {
-                    let (loss, grad) = backend.evaluate_both(black_box(phases));
+                    let (loss, grad) = backend.evaluate_f_grad(black_box(phases));
                     black_box((loss, grad))
                 });
             },

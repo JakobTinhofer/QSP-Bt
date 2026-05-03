@@ -1,12 +1,77 @@
-use clap::{Parser, Subcommand};
+use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
 use ndarray::Array1;
 use num_complex::Complex64;
 use rand::distr::{Distribution, Uniform};
 use std::f64::consts::TAU;
 use std::path::PathBuf;
 
+use crate::compute::ComputeBackend;
 use crate::compute::cpu::BackendMode;
-use crate::solver::{Parity, SolveMode};
+use crate::solvers::bfgs::BfgsOptions;
+use crate::solvers::lm::LmOptions;
+use crate::solvers::{SolveMode, Solver};
+use crate::target::Parity;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum SolverKind {
+    /// Limited-memory BFGS (default; good for smooth, well-conditioned problems)
+    Bfgs,
+    /// Levenberg-Marquardt (best for nonlinear least-squares with ill-conditioning)
+    Lm, /*
+        /// Gauss-Newton (LM without damping; faster when it works, can diverge)
+        Gn,
+         */
+}
+/*
+#[derive(ClapArgs, Debug, Clone)]
+#[command(next_help_heading = "Gauss-Newton Options")]
+pub struct GnOptions {
+    #[arg(id = "gn_max_iters", long = "gn-max-iters", default_value = "200")]
+    pub max_iters: u64,
+    #[arg(id = "gn_tol", long = "gn-tol", default_value = "1e-10")]
+    pub tol: f64,
+} */
+
+#[derive(ClapArgs, Debug, Clone)]
+pub struct SolverArgs {
+    /// Which optimizer to use
+    #[arg(short = 's', long = "solver", value_enum, default_value_t = SolverKind::Bfgs)]
+    pub kind: SolverKind,
+
+    #[command(flatten)]
+    pub bfgs: BfgsOptions,
+
+    #[command(flatten)]
+    pub lm: LmOptions,
+    /*    #[command(flatten)]
+    pub gn: GnOptions,  */
+}
+
+impl SolverArgs {
+    pub fn get_solver<T: ComputeBackend>(&self) -> Box<dyn Solver<T>> {
+        match self.kind {
+            SolverKind::Bfgs => Box::new(self.bfgs.clone()),
+            SolverKind::Lm => Box::new(self.lm.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SolverConfig {
+    Bfgs(BfgsOptions),
+    Lm(LmOptions),
+    //    Gn(GnOptions),
+}
+
+impl From<SolverArgs> for SolverConfig {
+    fn from(s: SolverArgs) -> Self {
+        match s.kind {
+            SolverKind::Bfgs => SolverConfig::Bfgs(s.bfgs),
+            SolverKind::Lm => SolverConfig::Lm(s.lm),
+            //          SolverKind::Gn => SolverConfig::Gn(s.gn),
+        }
+    }
+}
 
 #[derive(Subcommand)]
 pub enum Task {
@@ -65,17 +130,10 @@ pub struct Args {
     #[arg(short = 'M', long, value_parser = parse_solve_mode, default_value = "hotstart,20,60")]
     pub mode: SolveMode,
 
-    /// Any L-BFGS call will only go up to this number of iters. Will break when this is reached and display a debug message.
-    #[arg(short = 'i', long, default_value = "500000")]
-    pub lbfgs_max_iters: u64,
-
-    /// If the local change is smaller than this tolerance, break
-    #[arg(short = 't', long, default_value = "1e-8")]
-    pub tol_grad: f64,
-
-    /// Memory for L-BFGS
-    #[arg(long, default_value = "10")]
-    pub lbfgs_mem: usize,
+    /// Solver selection and configuration. Use --solver to pick;
+    /// pass --bfgs-*, --lm-*, or --gn-* flags as appropriate.
+    #[command(flatten)]
+    pub solver: SolverArgs,
 }
 
 pub fn parse_solve_mode(s: &str) -> Result<SolveMode, String> {

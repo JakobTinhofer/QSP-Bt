@@ -2,7 +2,8 @@ use clap::Parser;
 use ex3_rs::cli::{Args, BLUE, GREEN, RESET, Task, format_array, format_array_real};
 use ex3_rs::compute::ComputeBackend;
 use ex3_rs::compute::cpu::CpuComputeBackend;
-use ex3_rs::solver::{Parity, SolveMode, TargetPoly, solve_with_mode};
+use ex3_rs::solvers::{SolveMode, SolveOutcome};
+use ex3_rs::target::{Parity, TargetPoly};
 use ndarray::Array1;
 use num_complex::Complex64;
 use rand::distr::Distribution;
@@ -31,14 +32,17 @@ fn main() -> std::io::Result<()> {
             println!("y:\n{}", format_array(&backend.get_target().ys, 3));
 
             let start = Instant::now();
-            let (sol, f_err) = solve_with_mode(
-                &backend,
-                &args.mode,
-                args.lbfgs_max_iters,
-                args.tol_grad,
-                args.lbfgs_mem,
-            )
-            .expect("Did not converge. Try a different mode or higher degree.");
+            let SolveOutcome {
+                phases: sol,
+                cost: f_err,
+                iterations: _,
+                term_reason: _,
+            } = args
+                .solver
+                .get_solver::<CpuComputeBackend>()
+                .solve(&backend, args.mode)
+                .expect("Solver failed!");
+
             let elapsed = start.elapsed();
             let sol_str = sol
                 .iter()
@@ -104,26 +108,29 @@ fn main() -> std::io::Result<()> {
                 let backend = CpuComputeBackend::new(target, args.backend_mode);
 
                 let mode = match args.mode {
-                    ex3_rs::solver::SolveMode::Simple(_) => SolveMode::Simple(current_degree),
-                    ex3_rs::solver::SolveMode::Hotstart(d1, d2) => SolveMode::Hotstart(
+                    SolveMode::Simple(_) => SolveMode::Simple(current_degree),
+                    SolveMode::Hotstart(d1, d2) => SolveMode::Hotstart(
                         ((d1 as f64) / (d2 as f64) * (current_degree as f64)) as usize,
                         current_degree as usize,
                     ),
-                    ex3_rs::solver::SolveMode::Cascade(s, d) => SolveMode::Cascade(
+                    SolveMode::Cascade(s, d) => SolveMode::Cascade(
                         ((s as f64) / (d as f64) * (current_degree as f64)) as usize,
                         ((current_target_len as f64) * ratio_phases_to_target) as usize,
                     ),
                 };
 
                 let start = Instant::now();
-                let (_, f_err) = solve_with_mode(
-                    &backend,
-                    &mode,
-                    args.lbfgs_max_iters,
-                    args.tol_grad,
-                    args.lbfgs_mem,
-                )
-                .expect("Did not converge. Try a different mode or higher degree.");
+                let SolveOutcome {
+                    phases: _,
+                    cost: f_err,
+                    iterations: _,
+                    term_reason: _,
+                } = args
+                    .solver
+                    .get_solver::<CpuComputeBackend>()
+                    .solve(&backend, mode)
+                    .expect("Solver failed!");
+
                 let elapsed = start.elapsed();
                 let elapsed_s = elapsed.as_secs_f64();
                 running_avg_rt += elapsed_s / (avg_n as f64);
