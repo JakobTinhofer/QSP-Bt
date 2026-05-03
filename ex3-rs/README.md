@@ -1,7 +1,6 @@
-TODO:
+# The goal
 
-- get plot data for k plot
-- more flexible polynome input
+push larger and larger polys. Current largest fit: rand,100 with hotstart,80,400 in ~800s
 
 runs in <1s for poly degree of 60 using hotstart
 
@@ -10,20 +9,28 @@ runs in <1s for poly degree of 60 using hotstart
 ```
 Fit a QSP polynomial to the given sequence of target points.
 
-Usage: ex3-rs [OPTIONS] <TARGET_Y>
+Usage: ex3-rs [OPTIONS] <COMMAND>
 
-Arguments:
-  <TARGET_Y>  complex numbers with mod <= 1 seperated by commas (eg "0.5+0.3i, -0.2-0.7i, 0.1i") or "rand,n": initializes with n points that are either 1 or 0 (which are then mirrored, see parity) "rand-phase,n" initializes with n points that are like exp(iφ) with random φ ∈ [0, 2π)
+Commands:
+  solve-poly
+  plot-runtimes
+  help           Print this message or the help of the given subcommand(s)
 
 Options:
-  -d, --degree <DEGREE>        degree (>0) [default: 60]
-  -s, --hotstart <HOTSTART>    hotstart-degree (>0) [default: 20]
-  -p, --parity <PARITY>        parity ("even" or "odd") [default: even] [possible values: even, odd]
-  -o, --output <OUTPUT>        Path for the solution output
-  -D, --drawable <DRAWABLE>    Path for outputing the data formated to be drawn in gnuplot
-  -t, --tolerance <TOLERANCE>  Will retry until error func is below this value. This might not happen for some polynomials. By default it will just run once and always succeed
-  -i, --maxiter <MAXITER>      Will reseed for up to maxiter times as long as tolerance is not reached [default: 10]
-  -h, --help                   Print help
+  -m, --backend-mode <BACKEND_MODE>  Enable/disable multithreading for gradient, lossfunction evaluation. Auto: will do single threading for small d & short sequences. (both <= 100) [default: auto] [possible values: single-thread, multi-thread, auto]
+  -M, --mode <MODE>                  Solve mode: "simple,D" — direct solve at degree D "hotstart,S,D" — solve at degree S, then continue at degree D "cascade,N,D" — N cascading steps up to degree D if running PlotRuntimes task, this will be interpreted as a ratio and scaled accordingly [default: hotstart,20,60]
+  -s, --solver <KIND>                Which optimizer to use [default: bfgs] [possible values: bfgs, lm]
+  -h, --help                         Print help (see more with '--help')
+
+L-BFGS Options:
+      --bfgs-max-iters <bfgs_max_iters>  [default: 500000]
+      --bfgs-mem <bfgs_mem>              [default: 10]
+      --bfgs-tol-grad <bfgs_tol_grad>    [default: 1e-8]
+
+Levenberg-Marquardt Options:
+      --lm-max-iters <lm_max_iters>            [default: 500]
+      --lm-initial-lambda <lm_initial_lambda>  [default: 1e-4]
+      --lm-tol <lm_tol>                        [default: 1e-10]
 ```
 
 ### Example output
