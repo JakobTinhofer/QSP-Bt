@@ -1,14 +1,88 @@
 use clap::ValueEnum;
 use ndarray::Array1;
 use num_complex::Complex64;
+use rand::distr::{Distribution, Uniform};
 
-use std::f64::consts::PI;
+use std::{f64::consts::PI, f64::consts::TAU};
+
+use crate::utils::parse_usize_gt_0;
 
 #[derive(Debug)]
 pub struct TargetPoly {
     pub xs: Array1<f64>,
     pub ys: Array1<Complex64>,
     pub thetas: Array1<f64>,
+}
+
+#[derive(Clone, Debug)]
+pub enum TargetPattern {
+    RandomPeaks,
+    RandomPhases,
+    GeneralizedParity { r: usize, k: usize },
+    DataRepeating(Array1<Complex64>),
+}
+
+impl TargetPattern {
+    pub fn parse(str: &str) -> Result<TargetPattern, String> {
+        let trimmed = str.trim();
+
+        let parts: Vec<&str> = trimmed.split(",").collect();
+        match parts.as_slice() {
+            ["rand-peaks" | "rand"] => Ok(TargetPattern::RandomPeaks),
+            ["rand-phases"] => Ok(TargetPattern::RandomPhases),
+            ["gp", r, k] => Ok(TargetPattern::GeneralizedParity {
+                r: parse_usize_gt_0(r, "gp")?,
+                k: k.parse()
+                    .map_err(|e| format!("Failed to parse k. Err: {e}"))?,
+            }),
+            [first, ..] if matches!(*first, "rand-peaks" | "rand-phases" | "gp") => {
+                Err(format!("Wrong number of arguments for '{}'", first))
+            }
+            _ => Ok(TargetPattern::DataRepeating(
+                trimmed
+                    .split(',')
+                    .map(|part| {
+                        let cleaned = part.replace(char::is_whitespace, "");
+                        cleaned
+                            .parse::<Complex64>()
+                            .map_err(|e| format!("'{}': {}", part.trim(), e))
+                    })
+                    .collect::<Result<_, _>>()?,
+            )),
+        }
+    }
+
+    pub fn get_yhalf(&self, n: usize) -> Array1<Complex64> {
+        let mut rng = rand::rng();
+        match self {
+            TargetPattern::RandomPeaks => {
+                let bool_dist = rand::distr::Bernoulli::new(0.5).unwrap();
+                (0..n)
+                    .map(|_| { if bool_dist.sample(&mut rng) { 1. } else { 0. } }.into())
+                    .collect()
+            }
+            TargetPattern::RandomPhases => {
+                let p_dist = Uniform::new(0., TAU).unwrap();
+                (0..n)
+                    .map(|_| {
+                        let phi: f64 = p_dist.sample(&mut rng);
+                        Complex64::from_polar(1.0, phi)
+                    })
+                    .collect()
+            }
+            TargetPattern::GeneralizedParity { r, k } => (0..n)
+                .map(|m| {
+                    if ((m - k) % r) == 0 {
+                        Complex64::ONE
+                    } else {
+                        Complex64::ZERO
+                    }
+                })
+                .collect(),
+            // extend repeating pattern
+            TargetPattern::DataRepeating(a) => (0..n).map(|i| a[i % a.len()]).collect(),
+        }
+    }
 }
 
 impl TargetPoly {
@@ -49,6 +123,10 @@ impl TargetPoly {
             s.ys[n_half - i - 1] = parity_sign * target_y_half[i];
         }
         s
+    }
+
+    pub fn from_pattern(bp: &TargetPattern, p: Parity, n: usize) -> Self {
+        Self::new_forced_parity(bp.get_yhalf(n), p)
     }
 }
 

@@ -3,6 +3,7 @@ use ndarray::Array1;
 use crate::{
     compute::ComputeBackend,
     solvers::strategies::{solve_cascade_seeded, solve_hotstart_seeded, solve_seeded},
+    utils::parse_usize_gt_0,
 };
 
 pub mod bfgs;
@@ -36,6 +37,38 @@ pub enum SolveMode {
     /// N cascading solves, gradually increasing degree from a small initial value
     /// up to the final degree, each warm-starting from the previous.
     Cascade(usize, usize),
+}
+
+impl SolveMode {
+    pub fn parse(str: &str) -> Result<Self, String> {
+        let trimmed = str.trim();
+
+        let parts: Vec<&str> = trimmed.split(",").collect();
+        match parts.as_slice() {
+            ["simple" | "s", n] => Ok(SolveMode::Simple(parse_usize_gt_0(n, "simple")?)),
+            ["hotstart" | "h", f, s] => Ok(SolveMode::Hotstart(
+                parse_usize_gt_0(f, "hotstart")?,
+                parse_usize_gt_0(s, "hotstart")?,
+            )),
+            ["cascade" | "c", s, f] => Ok(SolveMode::Cascade(
+                parse_usize_gt_0(f, "cascade")?,
+                parse_usize_gt_0(s, "cascade")?,
+            )),
+            _ => Err(format!("Could not parse solve mode: '{str}'")),
+        }
+    }
+
+    pub fn rescale(self, d: usize) -> Self {
+        match self {
+            SolveMode::Simple(_) => SolveMode::Simple(d),
+            SolveMode::Hotstart(d1, d2) => {
+                SolveMode::Hotstart(((d1 as f64) / (d2 as f64) * (d as f64)) as usize, d)
+            }
+            SolveMode::Cascade(s, d) => {
+                SolveMode::Cascade(((s as f64) / (d as f64) * (d as f64)) as usize, d)
+            }
+        }
+    }
 }
 
 pub trait Solver<T: ComputeBackend> {

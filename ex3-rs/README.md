@@ -160,4 +160,5 @@ gnuplot -e "infile='./data/r10.dat'; outfile='./plotting/r10.png'" ./plotting/pl
 ```
 
 gives
+
 ![The plot output](./plotting/r10.png)

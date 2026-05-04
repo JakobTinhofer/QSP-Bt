@@ -1,8 +1,6 @@
 use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
 use ndarray::Array1;
 use num_complex::Complex64;
-use rand::distr::{Distribution, Uniform};
-use std::f64::consts::TAU;
 use std::path::PathBuf;
 
 use crate::compute::ComputeBackend;
@@ -10,7 +8,7 @@ use crate::compute::cpu::BackendMode;
 use crate::solvers::bfgs::BfgsOptions;
 use crate::solvers::lm::LmOptions;
 use crate::solvers::{SolveMode, Solver};
-use crate::target::Parity;
+use crate::target::{Parity, TargetPattern};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum SolverKind {
@@ -33,7 +31,7 @@ pub struct GnOptions {
 } */
 
 #[derive(ClapArgs, Debug, Clone)]
-pub struct SolverArgs {
+pub struct SolverConfig {
     /// Which optimizer to use
     #[arg(short = 's', long = "solver", value_enum, default_value_t = SolverKind::Bfgs)]
     pub kind: SolverKind,
@@ -43,11 +41,18 @@ pub struct SolverArgs {
 
     #[command(flatten)]
     pub lm: LmOptions,
+
+    /// Solve mode: "simple,D" — direct solve at degree D
+    ///             "hotstart,S,D" — solve at degree S, then continue at degree D
+    ///             "cascade,N,D" — N cascading steps up to degree D
+    /// if running PlotRuntimes task, this will be interpreted as a ratio and scaled accordingly
+    #[arg(short = 'M', long, value_parser = SolveMode::parse, default_value = "hotstart,20,60")]
+    pub mode: SolveMode,
     /*    #[command(flatten)]
     pub gn: GnOptions,  */
 }
 
-impl SolverArgs {
+impl SolverConfig {
     pub fn get_solver<T: ComputeBackend>(&self) -> Box<dyn Solver<T>> {
         match self.kind {
             SolverKind::Bfgs => Box::new(self.bfgs.clone()),
@@ -56,35 +61,12 @@ impl SolverArgs {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum SolverConfig {
-    Bfgs(BfgsOptions),
-    Lm(LmOptions),
-    //    Gn(GnOptions),
-}
-
-impl From<SolverArgs> for SolverConfig {
-    fn from(s: SolverArgs) -> Self {
-        match s.kind {
-            SolverKind::Bfgs => SolverConfig::Bfgs(s.bfgs),
-            SolverKind::Lm => SolverConfig::Lm(s.lm),
-            //          SolverKind::Gn => SolverConfig::Gn(s.gn),
-        }
-    }
-}
-
 #[derive(Subcommand)]
 pub enum Task {
     SolvePoly {
-        /// complex numbers with mod <= 1 seperated by commas (eg "0.5+0.3i, -0.2-0.7i, 0.1i") or
-        /// "rand,n": initializes with n points that are either 1 or 0 (which are then mirrored, see parity)
-        /// "rand-phase,n" initializes with n points that are like exp(iφ) with random φ ∈ [0, 2π)
-        #[arg(value_parser = parse_target)]
-        target_y: Array1<Complex64>,
-
-        /// parity ("even" or "odd")
-        #[arg(short = 'p', long, value_enum, default_value_t = Parity::Even)]
-        parity: Parity,
+        /// How long to make the target. Since the target is mirrored afterwars, this is half of the final length.
+        #[arg(short = 'n', long, default_value_t = 100)]
+        target_half_len: usize,
 
         /// Path for the solution output
         #[arg(short = 'o', long)]
@@ -111,11 +93,24 @@ pub enum Task {
         avg_n: usize,
     },
 }
+#[derive(ClapArgs, Debug, Clone)]
+#[command(next_help_heading = "Target configuration")]
+pub struct TargetConfig {
+    /// complex numbers with mod <= 1 seperated by commas (eg "0.5+0.3i, -0.2-0.7i, 0.1i") that will be repeated up to target length
+    /// "rand": random points that are either 1 or 0 (which are then mirrored, see parity)
+    /// "rand-phase" random points that are like exp(iφ) with random φ ∈ [0, 2π)
+    /// "gp,r,k" generalized parity target with r,k
+    #[arg(short='t', long, value_parser = TargetPattern::parse, default_value = "rand")]
+    pub target_pattern: TargetPattern,
+
+    /// parity ("even" or "odd")
+    #[arg(short = 'p', long, value_enum, default_value_t = Parity::Even)]
+    pub parity: Parity,
+}
 
 #[derive(Parser)]
 #[command(about = "Fit a QSP polynomial to the given sequence of target points.")]
 pub struct Args {
-    ///which task to execute. Will solve given poly be default.
     #[command(subcommand)]
     pub task: Task,
 
@@ -123,133 +118,13 @@ pub struct Args {
     #[arg(short = 'm', long, value_enum, default_value_t = BackendMode::Auto)]
     pub backend_mode: BackendMode,
 
-    /// Solve mode: "simple,D" — direct solve at degree D
-    ///             "hotstart,S,D" — solve at degree S, then continue at degree D
-    ///             "cascade,N,D" — N cascading steps up to degree D
-    /// if running PlotRuntimes task, this will be interpreted as a ratio and scaled accordingly
-    #[arg(short = 'M', long, value_parser = parse_solve_mode, default_value = "hotstart,20,60")]
-    pub mode: SolveMode,
-
     /// Solver selection and configuration. Use --solver to pick;
     /// pass --bfgs-*, --lm-*, or --gn-* flags as appropriate.
     #[command(flatten)]
-    pub solver: SolverArgs,
-}
+    pub solver: SolverConfig,
 
-pub fn parse_solve_mode(s: &str) -> Result<SolveMode, String> {
-    let trimmed = s.trim();
-
-    if let Some(rest) = trimmed.strip_prefix("simple,") {
-        let d = parse_positive(rest.trim())?;
-        return Ok(SolveMode::Simple(d));
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("hotstart,") {
-        let parts: Vec<&str> = rest.split(',').collect();
-        if parts.len() != 2 {
-            return Err(format!(
-                "hotstart: expected 'hotstart,S,D' but got '{}'",
-                trimmed
-            ));
-        }
-        let s_deg = parse_positive(parts[0].trim())?;
-        let d_deg = parse_positive(parts[1].trim())?;
-        if s_deg >= d_deg {
-            return Err(format!(
-                "hotstart: hotstart degree ({}) must be < final degree ({})",
-                s_deg, d_deg
-            ));
-        }
-        return Ok(SolveMode::Hotstart(s_deg, d_deg));
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("cascade,") {
-        let parts: Vec<&str> = rest.split(',').collect();
-        if parts.len() != 2 {
-            return Err(format!(
-                "cascade: expected 'cascade,N,D' but got '{}'",
-                trimmed
-            ));
-        }
-        let n_steps = parse_positive(parts[0].trim())?;
-        let d_deg = parse_positive(parts[1].trim())?;
-        if n_steps < 2 {
-            return Err("cascade: N must be >= 2".into());
-        }
-        return Ok(SolveMode::Cascade(n_steps, d_deg));
-    }
-
-    Err(format!(
-        "Unknown solve mode '{}'. Expected one of: simple,D | hotstart,S,D | cascade,N,D",
-        trimmed
-    ))
-}
-
-pub fn parse_positive(s: &str) -> Result<usize, String> {
-    let n: usize = s
-        .parse()
-        .map_err(|_| format!("'{s}' ist keine gültige Ganzzahl"))?;
-    if n == 0 {
-        Err("Wert muss > 0 sein".into())
-    } else {
-        Ok(n)
-    }
-}
-
-pub fn parse_count(s: &str, mode: &str) -> Result<usize, String> {
-    let n: usize = s
-        .trim()
-        .parse()
-        .map_err(|_| format!("{mode}: '{s}' ist keine gültige Anzahl"))?;
-    if n == 0 {
-        Err(format!("{mode}: Anzahl muss > 0 sein"))
-    } else {
-        Ok(n)
-    }
-}
-
-pub fn parse_target(s: &str) -> Result<Array1<Complex64>, String> {
-    let trimmed = s.trim();
-    let mut rng = rand::rng();
-
-    if let Some(rest) = trimmed.strip_prefix("rand-phase,") {
-        let n = parse_count(rest, "rand-phase")?;
-        let p_dist = Uniform::new(0., TAU).unwrap();
-        let numbers: Array1<Complex64> = (0..n)
-            .map(|_| {
-                let phi: f64 = p_dist.sample(&mut rng);
-                Complex64::from_polar(1.0, phi)
-            })
-            .collect();
-        return Ok(numbers);
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("rand,") {
-        let n = parse_count(rest, "rand")?;
-        let bool_dist = rand::distr::Bernoulli::new(0.5).unwrap();
-        let numbers: Array1<Complex64> = (0..n)
-            .map(|_| { if bool_dist.sample(&mut rng) { 1. } else { 0. } }.into())
-            .collect();
-        return Ok(numbers);
-    }
-
-    let numbers: Array1<Complex64> = trimmed
-        .split(',')
-        .map(|part| {
-            let cleaned = part.replace(char::is_whitespace, "");
-            cleaned
-                .parse::<Complex64>()
-                .map_err(|e| format!("'{}': {}", part.trim(), e))
-        })
-        .collect::<Result<_, _>>()?;
-
-    for (i, z) in numbers.iter().enumerate() {
-        if z.norm() > 1.0 {
-            return Err(format!("Zahl {i} ({z}) hat Betrag {:.4} > 1", z.norm()));
-        }
-    }
-
-    Ok(numbers)
+    #[command(flatten)]
+    pub target: TargetConfig,
 }
 
 pub const RED: &str = "\x1b[31m";
