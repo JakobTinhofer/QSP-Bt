@@ -7,7 +7,7 @@ use crate::compute::ComputeBackend;
 use crate::compute::cpu::BackendMode;
 use crate::solvers::bfgs::BfgsOptions;
 use crate::solvers::lm::LmOptions;
-use crate::solvers::{SolveMode, Solver};
+use crate::solvers::{PhaseMap, SolveMode, Solver};
 use crate::target::{Parity, TargetPattern};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -48,8 +48,15 @@ pub struct SolverConfig {
     /// if running PlotRuntimes task, this will be interpreted as a ratio and scaled accordingly
     #[arg(short = 'M', long, value_parser = SolveMode::parse, default_value = "hotstart,20,60")]
     pub mode: SolveMode,
-    /*    #[command(flatten)]
-    pub gn: GnOptions,  */
+
+    /// Maps the phases before the QSP unitary is constructed.
+    /// Use mirror for polynomial targets that are real.
+    /// Mirror will double the effective parameter count, the
+    /// parameter count given by --mode is the number of parameters
+    /// used by the optimizer, but (if mirrored) only half the amount of phases used to construct
+    /// the qsp unitary.
+    #[arg(short = 'P', long, value_enum, default_value_t = PhaseMap::MirrorIfPossible)]
+    pub phase_map: PhaseMap,
 }
 
 impl SolverConfig {
@@ -91,6 +98,9 @@ pub enum Task {
 
         #[arg(short = 'n', long, default_value = "3")]
         avg_n: usize,
+
+        #[arg(long)]
+        force_degree_parity: bool,
     },
 }
 #[derive(ClapArgs, Debug, Clone)]

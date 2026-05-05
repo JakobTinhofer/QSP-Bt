@@ -12,6 +12,7 @@ pub struct TargetPoly {
     pub xs: Array1<f64>,
     pub ys: Array1<Complex64>,
     pub thetas: Array1<f64>,
+    pattern: Option<TargetPattern>,
 }
 
 #[derive(Clone, Debug)]
@@ -83,9 +84,25 @@ impl TargetPattern {
             TargetPattern::DataRepeating(a) => (0..n).map(|i| a[i % a.len()]).collect(),
         }
     }
+
+    pub fn all_real(&self) -> bool {
+        match self {
+            TargetPattern::RandomPeaks | TargetPattern::GeneralizedParity { r: _, k: _ } => true,
+            TargetPattern::RandomPhases => false,
+            TargetPattern::DataRepeating(a) => a.iter().all(|c| c.im.abs() <= 1e-8),
+        }
+    }
 }
 
 impl TargetPoly {
+    pub fn all_real(&self) -> bool {
+        if let Some(p) = &self.pattern {
+            p.all_real()
+        } else {
+            self.ys.iter().all(|c| c.im.abs() <= 1e-8)
+        }
+    }
+
     pub fn points_iter<'a>(&'a self) -> impl Iterator<Item = (&'a f64, &'a Complex64)> {
         self.xs.iter().zip(self.ys.iter())
     }
@@ -99,7 +116,12 @@ impl TargetPoly {
 
     pub fn from_parts(xs: Array1<f64>, ys: Array1<Complex64>) -> Self {
         let thetas = xs.mapv(|x| x.acos());
-        Self { xs, ys, thetas }
+        Self {
+            xs,
+            ys,
+            thetas,
+            pattern: None,
+        }
     }
 
     pub fn new_forced_parity(target_y_half: Array1<Complex64>, parity: Parity) -> Self {
@@ -108,6 +130,7 @@ impl TargetPoly {
             xs: Array1::zeros(2 * n_half),
             ys: Array1::zeros(2 * n_half),
             thetas: Array1::zeros(2 * n_half),
+            pattern: None,
         };
         let parity_sign = match parity {
             Parity::Even => 1.,
@@ -126,7 +149,9 @@ impl TargetPoly {
     }
 
     pub fn from_pattern(bp: &TargetPattern, p: Parity, n: usize) -> Self {
-        Self::new_forced_parity(bp.get_yhalf(n), p)
+        let mut t = Self::new_forced_parity(bp.get_yhalf(n), p);
+        t.pattern = Some(bp.clone());
+        t
     }
 }
 

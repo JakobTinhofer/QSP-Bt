@@ -5,7 +5,7 @@ use ex3_rs::cli::{
 use ex3_rs::compute::ComputeBackend;
 use ex3_rs::compute::cpu::{BackendMode, CpuComputeBackend};
 use ex3_rs::solvers::SolveOutcome;
-use ex3_rs::target::TargetPoly;
+use ex3_rs::target::{Parity, TargetPoly};
 use ndarray::Array1;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -39,7 +39,7 @@ fn do_solve(
         term_reason: _,
     } = s
         .get_solver::<CpuComputeBackend>()
-        .solve(&backend, s.mode)
+        .solve(&backend, s.mode, s.phase_map)
         .expect("Solver failed!");
 
     let elapsed = start.elapsed();
@@ -85,6 +85,7 @@ fn do_plot_runtimes(
     target_len_step: usize,
     ratio_phases_to_target: f64,
     avg_n: usize,
+    force_degree_parity: bool,
     b: BackendMode,
     s: SolverConfig,
     t: TargetConfig,
@@ -94,7 +95,13 @@ fn do_plot_runtimes(
     let mut running_avg_rt = 0.;
     let mut running_avg_e = 0.;
     loop {
-        let current_degree = ((current_target_len as f64) * ratio_phases_to_target) as usize;
+        let mut current_degree = ((current_target_len as f64) * ratio_phases_to_target) as usize;
+        if force_degree_parity {
+            match (current_degree % 2, t.parity) {
+                (0, Parity::Odd) | (1, Parity::Even) => current_degree += 1,
+                _ => (),
+            }
+        }
         let target = TargetPoly::from_pattern(&t.target_pattern, t.parity, current_target_len);
         eprintln!(
             "Target length: 2 * {}, Degree: {}",
@@ -114,7 +121,7 @@ fn do_plot_runtimes(
             term_reason: _,
         } = s
             .get_solver::<CpuComputeBackend>()
-            .solve(&backend, mode)
+            .solve(&backend, mode, s.phase_map)
             .expect("Solver failed!");
 
         let elapsed = start.elapsed();
@@ -156,6 +163,7 @@ fn main() -> std::io::Result<()> {
                     target_len_step,
                     ratio_phases_to_target,
                     avg_n,
+                    force_degree_parity,
                 },
             backend_mode,
             solver,
@@ -165,6 +173,7 @@ fn main() -> std::io::Result<()> {
             target_len_step,
             ratio_phases_to_target,
             avg_n,
+            force_degree_parity,
             backend_mode,
             solver,
             target,

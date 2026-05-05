@@ -1,6 +1,6 @@
 use crate::{
     compute::ComputeBackend,
-    solvers::{SolveOutcome, Solver},
+    solvers::{PhaseMap, SolveOutcome, Solver},
 };
 use argmin::{
     core::{CostFunction, Executor, Gradient},
@@ -28,6 +28,7 @@ pub struct BfgsOptions {
 
 struct QspProblem<'a, T: ComputeBackend> {
     backend: &'a T,
+    map: PhaseMap,
     cache: RefCell<Option<(Array1<f64>, f64, Array1<f64>)>>,
 }
 
@@ -42,8 +43,24 @@ impl<'a, T: ComputeBackend> QspProblem<'a, T> {
             }
         }
 
-        let (cost, grad) = self.backend.evaluate_f_grad(p);
-        *self.cache.borrow_mut() = Some((p.clone(), cost, grad.clone()));
+        let mut p_mapped = p.clone();
+        self.map
+            .apply(&mut p_mapped, self.backend.get_target())
+            .unwrap();
+
+        let (cost, mut grad) = self.backend.evaluate_f_grad(&p_mapped.view());
+
+        // in case we applied a map that changed our param size,
+        // reduce it. If different maps are used at a later point we might
+        // need to abstract this away into the map type.
+        if grad.len() > p.len() {
+            let mut new_grad = Array1::from_iter(grad.iter().take(p.len()).map(|p| *p));
+            for i in 0..(grad.len() / 2 as usize) {
+                new_grad[i] += grad[grad.len() - (i + 1)];
+            }
+            grad = new_grad;
+        }
+        *self.cache.borrow_mut() = Some((p_mapped, cost, grad.clone()));
         (cost, grad)
     }
 }
@@ -65,9 +82,10 @@ impl<'a, T: ComputeBackend> Gradient for QspProblem<'a, T> {
 }
 
 impl<B: ComputeBackend> Solver<B> for BfgsOptions {
-    fn run(&self, backend: &B, xs: ndarray::Array1<f64>) -> SolveOutcome {
+    fn run(&self, backend: &B, xs: ndarray::Array1<f64>, map: PhaseMap) -> SolveOutcome {
         let problem = QspProblem {
             backend,
+            map,
             cache: RefCell::new(None),
         };
         let linesearch: MoreThuenteLineSearch<Array1<f64>, Array1<f64>, f64> =
@@ -81,7 +99,9 @@ impl<B: ComputeBackend> Solver<B> for BfgsOptions {
             .run()
             .expect("Solver raised an error!");
 
-        let final_param = res.state.best_param.clone().unwrap();
+        let mut final_param = res.state.best_param.clone().unwrap();
+        map.apply(&mut final_param, backend.get_target())
+            .expect("...");
         let final_cost = res.state.best_cost;
         let iters = res.state.iter;
 

@@ -4,20 +4,21 @@ use std::f64::consts::PI;
 
 use crate::{
     compute::ComputeBackend,
-    solvers::{SolveOutcome, Solver},
+    solvers::{PhaseMap, SolveOutcome, Solver},
 };
 
 pub fn solve_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     s: &S,
     backend: &T,
     degree: usize,
+    map: PhaseMap,
     seed: u64,
 ) -> SolveOutcome {
     let mut rng = StdRng::seed_from_u64(seed);
     let init: Array1<f64> = (0..degree + 1)
         .map(|_| rng.random_range(0.0..2.0 * PI))
         .collect();
-    s.run(backend, init)
+    s.run(backend, init, map)
 }
 
 pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
@@ -25,6 +26,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     backend: &T,
     n_steps: usize,
     final_degree: usize,
+    map: PhaseMap,
     seed: u64,
 ) -> Result<SolveOutcome, String> {
     if n_steps < 2 {
@@ -38,6 +40,8 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         ));
     }
 
+    // TODO: get real parity
+    // this is very incorrect rn
     let target_parity = final_degree % 2;
 
     let mut degrees: Vec<usize> = (1..=n_steps)
@@ -67,7 +71,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         mut cost,
         mut iterations,
         mut term_reason,
-    } = solve_seeded(s, backend, degrees[0], seed);
+    } = solve_seeded(s, backend, degrees[0], map, seed);
     eprintln!("[cascade] step 0: degree {} → cost {:e}", degrees[0], cost);
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
@@ -87,7 +91,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
             cost,
             iterations,
             term_reason,
-        } = s.run(backend, padded);
+        } = s.run(backend, padded, map);
         eprintln!(
             "[cascade] step {}: degree {} → cost {:e} ({} iters)",
             i, d, cost, iterations
@@ -106,6 +110,7 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     backend: &T,
     hotstart_degree: usize,
     main_degree: usize,
+    map: PhaseMap,
     seed: u64,
 ) -> Result<SolveOutcome, String> {
     let SolveOutcome {
@@ -113,7 +118,7 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         cost: _,
         iterations: _,
         term_reason: _,
-    } = solve_seeded(s, backend, hotstart_degree, seed);
+    } = solve_seeded(s, backend, hotstart_degree, map, seed);
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
     let pertub: Array1<f64> = (0..main_degree - hotstart_degree)
@@ -121,9 +126,9 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         .collect();
     let padded = concatenate![Axis(0), phases, pertub];
 
-    let res = s.run(backend, padded);
+    let res = s.run(backend, padded, map);
     eprintln!(
-        "[L-BFGS hotstart] {} iterations, cost {:e}",
+        "[Hotstart] {} iterations, cost {:e}",
         res.iterations, res.cost
     );
 
