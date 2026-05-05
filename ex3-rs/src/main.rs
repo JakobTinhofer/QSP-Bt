@@ -70,7 +70,7 @@ fn do_solve(
 
         let xs = Array1::linspace(-1., 1., 600);
 
-        let px = backend.evaluate_poly(&sol, &xs);
+        let px = backend.evaluate_poly(&sol.view(), &xs.view());
         for (x, p) in xs.iter().zip(px.iter()) {
             writeln!(file, "{} {} {}", x, p.re, p.im)?;
         }

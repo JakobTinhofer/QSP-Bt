@@ -1,7 +1,7 @@
 pub mod c2x2;
 pub mod qsp;
 use clap::ValueEnum;
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, ArrayView1};
 use num_complex::{Complex64, ComplexFloat};
 
 use crate::{
@@ -50,6 +50,7 @@ impl CpuComputeBackend {
         Self { target: p, mode }
     }
 
+    #[inline(always)]
     fn eval_point(
         &self,
         x: f64,
@@ -118,7 +119,7 @@ impl CpuComputeBackend {
         (r, m00s.clone())
     }
 
-    fn evaluate_both_st(&self, phases: &Array1<f64>) -> (f64, Array1<f64>) {
+    fn evaluate_both_st(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
         let d = phases.len() - 1;
         let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
         let mut loss = 0.;
@@ -156,7 +157,7 @@ impl CpuComputeBackend {
 }
 
 impl ComputeBackend for CpuComputeBackend {
-    fn evaluate_res_jac(&self, phases: &Array1<f64>) -> (Array1<f64>, Array2<f64>) {
+    fn evaluate_res_jac(&self, phases: &ArrayView1<f64>) -> (Array1<f64>, Array2<f64>) {
         use rayon::prelude::*;
 
         let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
@@ -192,7 +193,7 @@ impl ComputeBackend for CpuComputeBackend {
         (residuals, jacobian)
     }
 
-    fn evaluate_f_grad(&self, phases: &Array1<f64>) -> (f64, Array1<f64>) {
+    fn evaluate_f_grad(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
         if self.mode == BackendMode::SingleThread
             || self.mode == BackendMode::Auto
                 && (phases.len() <= 100 && self.target.xs.len() <= 100)
@@ -290,7 +291,7 @@ impl ComputeBackend for CpuComputeBackend {
         (loss, g)
     }
 
-    fn evaluate_f(&self, phases: &Array1<f64>) -> f64 {
+    fn evaluate_f(&self, phases: &ArrayView1<f64>) -> f64 {
         self.target
             .points_iter()
             .zip(
@@ -308,7 +309,7 @@ impl ComputeBackend for CpuComputeBackend {
         &self.target
     }
 
-    fn evaluate_poly(&self, phases: &Array1<f64>, xs: &Array1<f64>) -> Array1<Complex64> {
+    fn evaluate_poly(&self, phases: &ArrayView1<f64>, xs: &ArrayView1<f64>) -> Array1<Complex64> {
         qsp_poly(phases.as_slice().unwrap(), xs.as_slice().unwrap())
     }
 }
@@ -350,8 +351,8 @@ mod tests {
             for seed in 0u64..5 {
                 let phases = random_phases(n, seed);
 
-                let (loss_new, grad_new) = backend.evaluate_f_grad(&phases);
-                let (loss_ref, grad_ref) = backend.evaluate_both_st(&phases);
+                let (loss_new, grad_new) = backend.evaluate_f_grad(&phases.view());
+                let (loss_ref, grad_ref) = backend.evaluate_both_st(&phases.view());
 
                 let loss_diff = (loss_new - loss_ref).abs();
                 let loss_rel = loss_diff / loss_ref.abs().max(1e-300);
@@ -394,7 +395,7 @@ mod tests {
         for &n in &[4_usize, 12] {
             for seed in 0u64..3 {
                 let phases = random_phases(n, seed);
-                let (_, grad_analytic) = backend.evaluate_f_grad(&phases);
+                let (_, grad_analytic) = backend.evaluate_f_grad(&phases.view());
 
                 // Central differences: g[k] ≈ (f(phi + h*e_k) - f(phi - h*e_k)) / (2h)
                 // h chosen as compromise between truncation (O(h^2)) and roundoff (O(eps/h)).
@@ -405,8 +406,8 @@ mod tests {
                     phi_plus[k] += h;
                     phi_minus[k] -= h;
 
-                    let f_plus = backend.evaluate_f(&phi_plus);
-                    let f_minus = backend.evaluate_f(&phi_minus);
+                    let f_plus = backend.evaluate_f(&phi_plus.view());
+                    let f_minus = backend.evaluate_f(&phi_minus.view());
                     let g_numeric = (f_plus - f_minus) / (2.0 * h);
 
                     let diff = (grad_analytic[k] - g_numeric).abs();

@@ -110,7 +110,7 @@ fn bench_evaluate_both(c: &mut Criterion) {
             &(backend, phases),
             |b, (backend, phases)| {
                 b.iter(|| {
-                    let (loss, grad) = backend.evaluate_f_grad(black_box(phases));
+                    let (loss, grad) = backend.evaluate_f_grad(black_box(&phases.view()));
                     black_box((loss, grad))
                 });
             },
