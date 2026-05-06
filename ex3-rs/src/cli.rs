@@ -15,33 +15,12 @@ pub enum SolverKind {
     /// Limited-memory BFGS (default; good for smooth, well-conditioned problems)
     Bfgs,
     /// Levenberg-Marquardt (best for nonlinear least-squares with ill-conditioning)
-    Lm, /*
-        /// Gauss-Newton (LM without damping; faster when it works, can diverge)
-        Gn,
-         */
+    Lm,
 }
-/*
-#[derive(ClapArgs, Debug, Clone)]
-#[command(next_help_heading = "Gauss-Newton Options")]
-pub struct GnOptions {
-    #[arg(id = "gn_max_iters", long = "gn-max-iters", default_value = "200")]
-    pub max_iters: u64,
-    #[arg(id = "gn_tol", long = "gn-tol", default_value = "1e-10")]
-    pub tol: f64,
-} */
 
 #[derive(ClapArgs, Debug, Clone)]
-pub struct SolverConfig {
-    /// Which optimizer to use
-    #[arg(short = 's', long = "solver", value_enum, default_value_t = SolverKind::Bfgs)]
-    pub kind: SolverKind,
-
-    #[command(flatten)]
-    pub bfgs: BfgsOptions,
-
-    #[command(flatten)]
-    pub lm: LmOptions,
-
+#[command(next_help_heading = "General solver options")]
+pub struct SolverCfg {
     /// Solve mode: "simple,D" — direct solve at degree D
     ///             "hotstart,S,D" — solve at degree S, then continue at degree D
     ///             "cascade,N,D" — N cascading steps up to degree D
@@ -57,9 +36,28 @@ pub struct SolverConfig {
     /// the qsp unitary.
     #[arg(short = 'P', long, value_enum, default_value_t = PhaseMap::MirrorIfPossible)]
     pub phase_map: PhaseMap,
+
+    #[arg(short = 'i', long, default_value = ".4")]
+    pub init_perturb_mag: f64,
 }
 
-impl SolverConfig {
+#[derive(ClapArgs, Debug, Clone)]
+pub struct SolverArgs {
+    /// Which optimizer to use
+    #[arg(short = 'S', long = "solver", value_enum, default_value_t = SolverKind::Bfgs)]
+    pub kind: SolverKind,
+
+    #[command(flatten)]
+    pub bfgs: BfgsOptions,
+
+    #[command(flatten)]
+    pub lm: LmOptions,
+
+    #[command(flatten)]
+    pub config: SolverCfg,
+}
+
+impl SolverArgs {
     pub fn get_solver<T: ComputeBackend>(&self) -> Box<dyn Solver<T>> {
         match self.kind {
             SolverKind::Bfgs => Box::new(self.bfgs.clone()),
@@ -72,7 +70,7 @@ impl SolverConfig {
 pub enum Task {
     SolvePoly {
         /// How long to make the target. Since the target is mirrored afterwars, this is half of the final length.
-        #[arg(short = 'n', long, default_value_t = 100)]
+        #[arg(short = 'n', long)]
         target_half_len: usize,
 
         /// Path for the solution output
@@ -89,7 +87,7 @@ pub enum Task {
         max_runtime: usize,
 
         /// How large to make the steps between different tries
-        #[arg(short = 'l', long, default_value = "5")]
+        #[arg(short = 's', long, default_value = "5")]
         target_len_step: usize,
 
         /// How many phase parameters to use per point of the target
@@ -101,6 +99,19 @@ pub enum Task {
 
         #[arg(long)]
         force_degree_parity: bool,
+    },
+    GetLeastPulses {
+        #[arg(short = 'd')]
+        start_d: usize,
+
+        #[arg(short = 's', long, default_value = "1")]
+        reduce_step_d: usize,
+
+        #[arg(short = 'n', long)]
+        target_len: usize,
+
+        #[arg(short = 'e', long, default_value = "1e-6")]
+        max_error: f64,
     },
 }
 #[derive(ClapArgs, Debug, Clone)]
@@ -131,7 +142,7 @@ pub struct Args {
     /// Solver selection and configuration. Use --solver to pick;
     /// pass --bfgs-*, --lm-*, or --gn-* flags as appropriate.
     #[command(flatten)]
-    pub solver: SolverConfig,
+    pub solver: SolverArgs,
 
     #[command(flatten)]
     pub target: TargetConfig,

@@ -116,8 +116,14 @@ impl SolveMode {
 pub trait Solver<T: ComputeBackend> {
     fn run(&self, backend: &T, xs: Array1<f64>, map: PhaseMap) -> SolveOutcome;
 
-    fn solve(&self, backend: &T, mode: SolveMode, map: PhaseMap) -> Result<SolveOutcome, String> {
-        self.solve_seeded(backend, mode, map, rand::random::<u64>())
+    fn solve(
+        &self,
+        backend: &T,
+        mode: SolveMode,
+        map: PhaseMap,
+        init_perturb: f64,
+    ) -> Result<SolveOutcome, String> {
+        self.solve_seeded(backend, mode, map, rand::random::<u64>(), init_perturb)
     }
 
     fn solve_seeded(
@@ -126,14 +132,22 @@ pub trait Solver<T: ComputeBackend> {
         mode: SolveMode,
         map: PhaseMap,
         seed: u64,
+        init_perturb: f64,
     ) -> Result<SolveOutcome, String> {
         match mode {
-            SolveMode::Simple(d) => Ok(solve_seeded::<T, Self>(&self, backend, d, map, seed)),
+            SolveMode::Simple(d) => Ok(solve_seeded::<T, Self>(
+                &self,
+                backend,
+                d,
+                map,
+                seed,
+                init_perturb,
+            )),
             SolveMode::Hotstart(s, d) => {
-                solve_hotstart_seeded::<T, Self>(&self, backend, s, d, map, seed)
+                solve_hotstart_seeded::<T, Self>(&self, backend, s, d, map, seed, init_perturb)
             }
             SolveMode::Cascade(n, d) => {
-                solve_cascade_seeded::<T, Self>(&self, backend, n, d, map, seed)
+                solve_cascade_seeded::<T, Self>(&self, backend, n, d, map, seed, init_perturb)
             }
         }
     }

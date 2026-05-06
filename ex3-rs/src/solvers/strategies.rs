@@ -13,11 +13,16 @@ pub fn solve_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     degree: usize,
     map: PhaseMap,
     seed: u64,
+    init_perturb: f64,
 ) -> SolveOutcome {
     let mut rng = StdRng::seed_from_u64(seed);
-    let init: Array1<f64> = (0..degree + 1)
-        .map(|_| rng.random_range(0.0..2.0 * PI))
-        .collect();
+    let init: Array1<f64> = if init_perturb > 1e-8 {
+        (0..degree + 1)
+            .map(|_| rng.random_range(0.0..init_perturb))
+            .collect()
+    } else {
+        Array1::zeros(degree + 1)
+    };
     s.run(backend, init, map)
 }
 
@@ -28,6 +33,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     final_degree: usize,
     map: PhaseMap,
     seed: u64,
+    init_perturb: f64,
 ) -> Result<SolveOutcome, String> {
     if n_steps < 2 {
         return Err(String::from("Cascade requires at least 2 Steps!"));
@@ -71,7 +77,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         mut cost,
         mut iterations,
         mut term_reason,
-    } = solve_seeded(s, backend, degrees[0], map, seed);
+    } = solve_seeded(s, backend, degrees[0], map, seed, init_perturb);
     eprintln!("[cascade] step 0: degree {} → cost {:e}", degrees[0], cost);
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
@@ -112,13 +118,14 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     main_degree: usize,
     map: PhaseMap,
     seed: u64,
+    init_perturb: f64,
 ) -> Result<SolveOutcome, String> {
     let SolveOutcome {
         phases,
         cost: _,
         iterations: _,
         term_reason: _,
-    } = solve_seeded(s, backend, hotstart_degree, map, seed);
+    } = solve_seeded(s, backend, hotstart_degree, map, seed, init_perturb);
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
     let pertub: Array1<f64> = (0..main_degree - hotstart_degree)

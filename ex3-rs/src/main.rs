@@ -1,6 +1,6 @@
 use clap::Parser;
 use ex3_rs::cli::{
-    Args, BLUE, GREEN, RESET, SolverConfig, TargetConfig, Task, format_array, format_array_real,
+    Args, BLUE, GREEN, RESET, SolverArgs, TargetConfig, Task, format_array, format_array_real,
 };
 use ex3_rs::compute::ComputeBackend;
 use ex3_rs::compute::cpu::{BackendMode, CpuComputeBackend};
@@ -16,7 +16,7 @@ fn do_solve(
     drawable: Option<PathBuf>,
     target_half_len: usize,
     b: BackendMode,
-    s: SolverConfig,
+    s: SolverArgs,
     t: TargetConfig,
 ) -> std::io::Result<()> {
     let backend = CpuComputeBackend::new(
@@ -25,8 +25,8 @@ fn do_solve(
     );
 
     println!(
-        "[{BLUE}i{RESET}] Running with mode={:?} and multithreading={:?}. Target:",
-        s.mode, b
+        "[{BLUE}i{RESET}] Running with config={:?} and multithreading={:?}. Target:",
+        s.config, b
     );
     println!("x:\n{}", format_array_real(&backend.get_target().xs, 3));
     println!("y:\n{}", format_array(&backend.get_target().ys, 3));
@@ -39,7 +39,12 @@ fn do_solve(
         term_reason: _,
     } = s
         .get_solver::<CpuComputeBackend>()
-        .solve(&backend, s.mode, s.phase_map)
+        .solve(
+            &backend,
+            s.config.mode,
+            s.config.phase_map,
+            s.config.init_perturb_mag,
+        )
         .expect("Solver failed!");
 
     let elapsed = start.elapsed();
@@ -87,7 +92,7 @@ fn do_plot_runtimes(
     avg_n: usize,
     force_degree_parity: bool,
     b: BackendMode,
-    s: SolverConfig,
+    s: SolverArgs,
     t: TargetConfig,
 ) -> std::io::Result<()> {
     let mut current_target_len = target_len_step;
@@ -111,7 +116,7 @@ fn do_plot_runtimes(
 
         let backend = CpuComputeBackend::new(target, b);
 
-        let mode = s.mode.rescale(current_degree);
+        let mode = s.config.mode.rescale(current_degree);
 
         let start = Instant::now();
         let SolveOutcome {
@@ -121,7 +126,12 @@ fn do_plot_runtimes(
             term_reason: _,
         } = s
             .get_solver::<CpuComputeBackend>()
-            .solve(&backend, mode, s.phase_map)
+            .solve(
+                &backend,
+                mode,
+                s.config.phase_map,
+                s.config.init_perturb_mag,
+            )
             .expect("Solver failed!");
 
         let elapsed = start.elapsed();
