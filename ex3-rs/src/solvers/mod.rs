@@ -6,7 +6,7 @@ use ndarray::{Array1, Axis};
 use crate::{
     compute::ComputeBackend,
     solvers::strategies::{solve_cascade_seeded, solve_hotstart_seeded, solve_seeded},
-    target::TargetPoly,
+    target::{Parity, TargetPoly},
     utils::parse_usize_gt_0,
 };
 
@@ -54,7 +54,10 @@ impl PhaseMap {
                     phase_in
                         .iter()
                         // keep the parity of the phase array
-                        .take(if n % 2 == 0 { n } else { n - 1 })
+                        .take(match (t.get_parity(), n % 2 == 0) {
+                            (Some(Parity::Odd), _) | (None, true) => n,
+                            (Some(Parity::Even), _) | (None, false) => n - 1,
+                        })
                         .rev()
                         .map(|p| *p),
                 );

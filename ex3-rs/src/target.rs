@@ -13,6 +13,7 @@ pub struct TargetPoly {
     pub ys: Array1<Complex64>,
     pub thetas: Array1<f64>,
     pattern: Option<TargetPattern>,
+    parity: Option<Parity>,
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +96,10 @@ impl TargetPattern {
 }
 
 impl TargetPoly {
+    pub fn get_parity(&self) -> Option<Parity> {
+        self.parity
+    }
+
     pub fn all_real(&self) -> bool {
         if let Some(p) = &self.pattern {
             p.all_real()
@@ -121,6 +126,7 @@ impl TargetPoly {
             ys,
             thetas,
             pattern: None,
+            parity: None,
         }
     }
 
@@ -131,6 +137,7 @@ impl TargetPoly {
             ys: Array1::zeros(2 * n_half),
             thetas: Array1::zeros(2 * n_half),
             pattern: None,
+            parity: Some(parity),
         };
         let parity_sign = match parity {
             Parity::Even => 1.,
