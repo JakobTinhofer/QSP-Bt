@@ -165,6 +165,44 @@ fn do_plot_runtimes(
     Ok(())
 }
 
+fn do_plot_error_by_d(
+    start_d: usize,
+    reduce_step_d: usize,
+    target_len: usize,
+    max_error: f64,
+    b: BackendMode,
+    s: SolverArgs,
+    t: TargetConfig,
+) -> std::io::Result<()> {
+    let backend = CpuComputeBackend::new(
+        TargetPoly::from_pattern(&t.target_pattern, t.parity, target_len),
+        b,
+    );
+
+    for current_d in (1..(start_d + 1)).rev().step_by(reduce_step_d) {
+        let SolveOutcome {
+            phases: _,
+            cost: f_err,
+            iterations: _,
+            term_reason: _,
+        } = s
+            .get_solver::<CpuComputeBackend>()
+            .solve(
+                &backend,
+                s.config.mode.rescale(current_d),
+                s.config.phase_map,
+                s.config.init_perturb_mag,
+            )
+            .expect("Solver failed!");
+        println!("{current_d} {f_err}");
+        if f_err >= max_error {
+            eprintln!("Done! Final error: {f_err:?}");
+            break;
+        }
+    }
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
@@ -206,6 +244,27 @@ fn main() -> std::io::Result<()> {
             output,
             drawable,
             target_half_len,
+            backend_mode,
+            solver,
+            target,
+        ),
+
+        Args {
+            task:
+                Task::GetLeastPulses {
+                    start_d,
+                    reduce_step_d,
+                    target_len,
+                    max_error,
+                },
+            backend_mode,
+            solver,
+            target,
+        } => do_plot_error_by_d(
+            start_d,
+            reduce_step_d,
+            target_len,
+            max_error,
             backend_mode,
             solver,
             target,
