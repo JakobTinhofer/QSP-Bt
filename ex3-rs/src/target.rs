@@ -20,6 +20,7 @@ pub struct TargetPoly {
 pub enum TargetPattern {
     RandomPeaks,
     RandomPhases,
+    CNZGate,
     GeneralizedParity { r: usize, k: usize },
     DataRepeating(Array1<Complex64>),
 }
@@ -32,6 +33,7 @@ impl TargetPattern {
         match parts.as_slice() {
             ["rand-peaks" | "rand"] => Ok(TargetPattern::RandomPeaks),
             ["rand-phases"] => Ok(TargetPattern::RandomPhases),
+            ["cnz-gate" | "c"] => Ok(TargetPattern::CNZGate),
             ["gp", r, k] => Ok(TargetPattern::GeneralizedParity {
                 r: parse_usize_gt_0(r, "gp")?,
                 k: k.parse()
@@ -83,12 +85,19 @@ impl TargetPattern {
                 .collect(),
             // extend repeating pattern
             TargetPattern::DataRepeating(a) => (0..n).map(|i| a[i % a.len()]).collect(),
+            TargetPattern::CNZGate => {
+                let mut v = Array1::from_vec(vec![Complex64::ONE; n]);
+                v[n - 1] = -Complex64::ONE;
+                v
+            }
         }
     }
 
     pub fn all_real(&self) -> bool {
         match self {
-            TargetPattern::RandomPeaks | TargetPattern::GeneralizedParity { r: _, k: _ } => true,
+            TargetPattern::RandomPeaks
+            | TargetPattern::GeneralizedParity { r: _, k: _ }
+            | TargetPattern::CNZGate => true,
             TargetPattern::RandomPhases => false,
             TargetPattern::DataRepeating(a) => a.iter().all(|c| c.im.abs() <= 1e-8),
         }
