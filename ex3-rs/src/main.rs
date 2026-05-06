@@ -66,18 +66,21 @@ fn do_solve(
 
     if let Some(path) = &drawable {
         let mut file = File::create(path)?;
-
-        backend.get_target().points_iter().for_each(|(x, y)| {
-            writeln!(file, "{} {} {}", x, y.re, y.im).expect("Failed to write to file!")
-        });
+        let t = backend.get_target();
+        t.points_iter()
+            .zip(t.thetas.iter())
+            .for_each(|((x, y), theta)| {
+                writeln!(file, "{} {} {} {}", x, y.re, y.im, theta)
+                    .expect("Failed to write to file!")
+            });
 
         write!(file, "\n\n")?;
 
-        let xs = Array1::linspace(-1., 1., 600);
+        let xs = Array1::linspace(-1., 1., 2000);
 
         let px = backend.evaluate_poly(&sol.view(), &xs.view());
         for (x, p) in xs.iter().zip(px.iter()) {
-            writeln!(file, "{} {} {}", x, p.re, p.im)?;
+            writeln!(file, "{} {} {} {}", x, p.re, p.im, x.acos())?;
         }
         println!("Wrote drawing data to '{}'", path.to_string_lossy());
     }
