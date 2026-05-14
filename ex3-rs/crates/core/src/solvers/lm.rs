@@ -95,7 +95,6 @@ impl<T: ComputeBackend> Solver<T> for LmOptions {
         let (vec, _) = xs.into_raw_vec_and_offset();
         let problem = QspLmProblem::new(backend, DVector::from_vec(vec), map);
         let (_res, _rep) = LevenbergMarquardt::new().minimize(problem);
-        eprintln!("FINISHED LM!!!! {:?}", _rep);
         Ok(SolveOutcome {
             term_reason: match _rep.termination {
                 levenberg_marquardt::TerminationReason::Converged { ftol: _, xtol: _ } => {

@@ -66,19 +66,12 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     *degrees.last_mut().unwrap() = final_degree;
     degrees.dedup();
 
-    eprintln!(
-        "[cascade] schedule (parity {}): {:?}",
-        if target_parity == 0 { "even" } else { "odd" },
-        degrees
-    );
-
     let SolveOutcome {
         mut phases,
         mut cost,
         mut iterations,
         mut term_reason,
     } = solve_seeded(s, backend, degrees[0], map, seed, init_perturb)?;
-    eprintln!("[cascade] step 0: degree {} → cost {:e}", degrees[0], cost);
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
 
@@ -98,10 +91,6 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
             iterations,
             term_reason,
         } = s.run(backend, padded, map)?;
-        eprintln!(
-            "[cascade] step {}: degree {} → cost {:e} ({} iters)",
-            i, d, cost, iterations
-        );
     }
     Ok(SolveOutcome {
         phases,
@@ -134,10 +123,6 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     let padded = concatenate![Axis(0), phases, pertub];
 
     let res = s.run(backend, padded, map)?;
-    eprintln!(
-        "[Hotstart] {} iterations, cost {:e}",
-        res.iterations, res.cost
-    );
 
     Ok(res)
 }
