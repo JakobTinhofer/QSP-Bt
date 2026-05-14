@@ -3,7 +3,6 @@ use crate::{
     solvers::{PhaseMap, SolveOutcome, Solver},
 };
 use anyhow::Result;
-use clap::Args as ClapArgs;
 use levenberg_marquardt::{LeastSquaresProblem, LevenbergMarquardt};
 use nalgebra::{DMatrix, DVector, Dyn, Owned};
 use ndarray::ArrayView1;
@@ -69,19 +68,21 @@ impl<'a, T: ComputeBackend> LeastSquaresProblem<f64, Dyn, Dyn> for QspLmProblem<
     }
 }
 
-#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
-#[command(next_help_heading = "Levenberg-Marquardt Options")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LmOptions {
-    #[arg(id = "lm_max_iters", long = "lm-max-iters", default_value = "500")]
     pub max_iters: u64,
-    #[arg(
-        id = "lm_initial_lambda",
-        long = "lm-initial-lambda",
-        default_value = "1e-4"
-    )]
     pub initial_lambda: f64,
-    #[arg(id = "lm_tol", long = "lm-tol", default_value = "1e-10")]
     pub tol: f64,
+}
+
+impl Default for LmOptions {
+    fn default() -> Self {
+        Self {
+            max_iters: 500,
+            initial_lambda: 1e-4,
+            tol: 1e-10,
+        }
+    }
 }
 
 impl<T: ComputeBackend> Solver<T> for LmOptions {

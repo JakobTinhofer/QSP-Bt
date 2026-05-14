@@ -8,24 +8,25 @@ use argmin::{
     solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
 };
 use argmin_math::Error;
-use clap::Args as ClapArgs;
 use ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 
-#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize, Default)]
-#[command(next_help_heading = "L-BFGS Options")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BfgsOptions {
-    #[arg(
-        id = "bfgs_max_iters",
-        long = "bfgs-max-iters",
-        default_value = "500000"
-    )]
     pub max_iters: u64,
-    #[arg(id = "bfgs_mem", long = "bfgs-mem", default_value = "10")]
     pub mem: usize,
-    #[arg(id = "bfgs_tol_grad", long = "bfgs-tol-grad", default_value = "1e-8")]
     pub tol_grad: f64,
+}
+
+impl Default for BfgsOptions {
+    fn default() -> Self {
+        Self {
+            max_iters: 500000,
+            mem: 10,
+            tol_grad: 1e-8,
+        }
+    }
 }
 
 struct QspProblem<'a, T: ComputeBackend> {

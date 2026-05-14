@@ -944,7 +944,6 @@ dependencies = [
  "anyhow",
  "argmin",
  "argmin-math",
- "clap",
  "levenberg-marquardt",
  "nalgebra",
  "ndarray",

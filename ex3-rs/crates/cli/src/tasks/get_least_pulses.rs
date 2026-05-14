@@ -1,7 +1,11 @@
 use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
-use qsp_rs_core::{compute::cpu::CpuComputeBackend, solvers::SolveOutcome, target::TargetPoly};
+use qsp_rs_core::{
+    compute::cpu::CpuComputeBackend,
+    solvers::SolveOutcome,
+    target::{Parity, TargetPoly},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Args, Serialize, Deserialize)]
@@ -26,11 +30,11 @@ pub struct GetLeastPulsesTask {
 impl TaskTrait for GetLeastPulsesTask {
     fn execute(&self, cfg: ProgramConfig) -> Result<()> {
         let t = cfg.target;
-        let b = cfg.backend_mode;
+        let b = qsp_rs_core::compute::cpu::BackendMode::from(cfg.backend_mode);
         let s = cfg.solver;
 
         let backend = CpuComputeBackend::new(
-            TargetPoly::from_pattern(&t.target_pattern, t.parity, self.target_len),
+            TargetPoly::from_pattern(&t.target_pattern, Parity::from(t.parity), self.target_len),
             b,
         );
 
@@ -45,7 +49,7 @@ impl TaskTrait for GetLeastPulsesTask {
                 .solve(
                     &backend,
                     s.strategy.mode.rescale(current_d),
-                    s.strategy.phase_map,
+                    qsp_rs_core::solvers::PhaseMap::from(s.strategy.phase_map),
                     s.strategy.init_perturb_mag,
                 )
                 .expect("Solver failed!");

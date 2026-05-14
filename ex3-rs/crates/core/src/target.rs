@@ -1,5 +1,4 @@
 use anyhow::Result;
-use clap::ValueEnum;
 use ndarray::Array1;
 use num_complex::Complex64;
 use rand::distr::{Distribution, Uniform};
@@ -169,7 +168,7 @@ impl TargetPoly {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Parity {
     Even,
     Odd,

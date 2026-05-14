@@ -6,9 +6,9 @@ use anyhow::Result;
 use clap::Args;
 use ndarray::Array1;
 use qsp_rs_core::compute::ComputeBackend;
-use qsp_rs_core::compute::cpu::CpuComputeBackend;
-use qsp_rs_core::solvers::SolveOutcome;
-use qsp_rs_core::target::TargetPoly;
+use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
+use qsp_rs_core::solvers::{PhaseMap, SolveOutcome};
+use qsp_rs_core::target::{Parity, TargetPoly};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
@@ -31,10 +31,10 @@ impl TaskTrait for SolvePolyTask {
         let backend = CpuComputeBackend::new(
             TargetPoly::from_pattern(
                 &cfg.target.target_pattern,
-                cfg.target.parity,
+                Parity::from(cfg.target.parity),
                 self.target_half_len,
             ),
-            cfg.backend_mode,
+            BackendMode::from(cfg.backend_mode),
         );
 
         println!(
@@ -52,7 +52,7 @@ impl TaskTrait for SolvePolyTask {
             .solve(
                 &backend,
                 cfg.solver.strategy.mode,
-                cfg.solver.strategy.phase_map,
+                PhaseMap::from(cfg.solver.strategy.phase_map),
                 cfg.solver.strategy.init_perturb_mag,
             )
             .expect("Solver failed!");

@@ -7,7 +7,6 @@ use crate::{
     utils::parse_usize_gt_0,
 };
 use anyhow::Result;
-use clap::ValueEnum;
 use ndarray::{Array1, Axis};
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +32,7 @@ pub struct SolveOutcome {
     pub term_reason: TerminationReason,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum PhaseMap {
     /// pass on the phases as-is
     None,

@@ -4,8 +4,8 @@ use crate::cli::{GREEN, RESET};
 use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
-use qsp_rs_core::compute::cpu::CpuComputeBackend;
-use qsp_rs_core::solvers::SolveOutcome;
+use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
+use qsp_rs_core::solvers::{PhaseMap, SolveOutcome};
 use qsp_rs_core::target::{Parity, TargetPoly};
 use serde::{Deserialize, Serialize};
 
@@ -37,8 +37,9 @@ pub struct PlotRuntimesTask {
 impl TaskTrait for PlotRuntimesTask {
     fn execute(&self, cfg: ProgramConfig) -> Result<()> {
         let t = cfg.target;
-        let b = cfg.backend_mode;
+        let b = BackendMode::from(cfg.backend_mode);
         let s = cfg.solver;
+        let p = Parity::from(t.parity);
 
         let mut current_target_len = self.target_len_step;
         let mut current_n = 0;
@@ -48,12 +49,12 @@ impl TaskTrait for PlotRuntimesTask {
             let mut current_degree =
                 ((current_target_len as f64) * self.ratio_phases_to_target) as usize;
             if self.force_degree_parity {
-                match (current_degree % 2, t.parity) {
+                match (current_degree % 2, p) {
                     (0, Parity::Odd) | (1, Parity::Even) => current_degree += 1,
                     _ => (),
                 }
             }
-            let target = TargetPoly::from_pattern(&t.target_pattern, t.parity, current_target_len);
+            let target = TargetPoly::from_pattern(&t.target_pattern, p, current_target_len);
             eprintln!(
                 "Target length: 2 * {}, Degree: {}",
                 target.xs.len() / 2 as usize,
@@ -73,7 +74,7 @@ impl TaskTrait for PlotRuntimesTask {
             } = s.get_solver::<CpuComputeBackend>().solve(
                 &backend,
                 mode,
-                s.strategy.phase_map,
+                PhaseMap::from(s.strategy.phase_map),
                 s.strategy.init_perturb_mag,
             )?;
 

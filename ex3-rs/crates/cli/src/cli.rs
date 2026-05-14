@@ -17,6 +17,23 @@ pub enum SolverKind {
     Lm,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Serialize, Deserialize, Debug)]
+pub enum PhaseMapArg {
+    None,
+    Mirror,
+    MirrorIfPossible,
+}
+
+impl From<PhaseMapArg> for PhaseMap {
+    fn from(a: PhaseMapArg) -> Self {
+        match a {
+            PhaseMapArg::None => PhaseMap::None,
+            PhaseMapArg::Mirror => PhaseMap::Mirror,
+            PhaseMapArg::MirrorIfPossible => PhaseMap::MirrorIfPossible,
+        }
+    }
+}
+
 #[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
 #[command(next_help_heading = "General solver options")]
 pub struct SolverStrategy {
@@ -34,8 +51,8 @@ pub struct SolverStrategy {
     /// parameter count given by --mode is the number of parameters
     /// used by the optimizer, but (if mirrored) only half the amount of phases used to construct
     /// the qsp unitary.
-    #[arg(short = 'P', long, value_enum, default_value_t = PhaseMap::MirrorIfPossible)]
-    pub phase_map: PhaseMap,
+    #[arg(short = 'P', long, value_enum, default_value_t = PhaseMapArg::MirrorIfPossible)]
+    pub phase_map: PhaseMapArg,
 
     /// The max. magnitude of the first guess for the random phases
     /// to initialize the solver. Choose 0 for mirrored phases to get faster
@@ -48,8 +65,8 @@ pub struct SolverStrategy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SolverConfig {
-    Bfgs(BfgsOptions),
-    Lm(LmOptions),
+    Bfgs(BfgsArgs),
+    Lm(LmArgs),
 }
 
 impl SolverArgs {
@@ -62,6 +79,52 @@ impl SolverArgs {
     }
 }
 
+#[derive(clap::Args, Debug, Clone, Serialize, Deserialize)]
+#[command(next_help_heading = "L-BFGS Options")]
+pub struct BfgsArgs {
+    #[arg(long = "bfgs-max-iters", default_value_t = BfgsOptions::default().max_iters)]
+    pub max_iters: u64,
+    #[arg(long = "bfgs-mem", default_value_t = BfgsOptions::default().mem)]
+    pub mem: usize,
+    #[arg(long = "bfgs-tol-grad", default_value_t = BfgsOptions::default().tol_grad)]
+    pub tol_grad: f64,
+}
+
+impl From<BfgsArgs> for BfgsOptions {
+    fn from(a: BfgsArgs) -> Self {
+        Self {
+            max_iters: a.max_iters,
+            mem: a.mem,
+            tol_grad: a.tol_grad,
+        }
+    }
+}
+
+#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
+#[command(next_help_heading = "Levenberg-Marquardt Options")]
+pub struct LmArgs {
+    #[arg(id = "lm_max_iters", long = "lm-max-iters", default_value = "500")]
+    pub max_iters: u64,
+    #[arg(
+        id = "lm_initial_lambda",
+        long = "lm-initial-lambda",
+        default_value = "1e-4"
+    )]
+    pub initial_lambda: f64,
+    #[arg(id = "lm_tol", long = "lm-tol", default_value = "1e-10")]
+    pub tol: f64,
+}
+
+impl From<LmArgs> for LmOptions {
+    fn from(a: LmArgs) -> Self {
+        Self {
+            max_iters: a.max_iters,
+            initial_lambda: a.initial_lambda,
+            tol: a.tol,
+        }
+    }
+}
+
 #[derive(ClapArgs, Debug, Clone)]
 pub struct SolverArgs {
     /// Which optimizer to use
@@ -69,10 +132,10 @@ pub struct SolverArgs {
     pub kind: SolverKind,
 
     #[command(flatten)]
-    pub bfgs: BfgsOptions,
+    pub bfgs: BfgsArgs,
 
     #[command(flatten)]
-    pub lm: LmOptions,
+    pub lm: LmArgs,
 
     #[command(flatten)]
     pub strategy: SolverStrategy,
@@ -81,8 +144,23 @@ pub struct SolverArgs {
 impl SolverArgs {
     pub fn get_solver<T: ComputeBackend>(&self) -> Box<dyn Solver<T>> {
         match self.kind {
-            SolverKind::Bfgs => Box::new(self.bfgs.clone()),
-            SolverKind::Lm => Box::new(self.lm.clone()),
+            SolverKind::Bfgs => Box::new(BfgsOptions::from(self.bfgs.clone())),
+            SolverKind::Lm => Box::new(LmOptions::from(self.lm.clone())),
+        }
+    }
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Serialize, Deserialize, Debug)]
+pub enum ParityArg {
+    Even,
+    Odd,
+}
+
+impl From<ParityArg> for Parity {
+    fn from(a: ParityArg) -> Self {
+        match a {
+            ParityArg::Even => Self::Even,
+            ParityArg::Odd => Self::Odd,
         }
     }
 }
@@ -98,15 +176,32 @@ pub struct TargetConfig {
     pub target_pattern: TargetPattern,
 
     /// parity ("even" or "odd")
-    #[arg(short = 'p', long, value_enum, default_value_t = Parity::Even)]
-    pub parity: Parity,
+    #[arg(short = 'p', long, value_enum, default_value_t = ParityArg::Even)]
+    pub parity: ParityArg,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Serialize, Deserialize, Debug)]
+pub enum BackendModeArg {
+    Auto,
+    SingleThread,
+    MultiThread,
+}
+
+impl From<BackendModeArg> for BackendMode {
+    fn from(a: BackendModeArg) -> Self {
+        match a {
+            BackendModeArg::SingleThread => Self::SingleThread,
+            BackendModeArg::MultiThread => Self::MultiThread,
+            BackendModeArg::Auto => Self::Auto,
+        }
+    }
 }
 
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ProgramConfig {
     /// Enable/disable multithreading for gradient, lossfunction evaluation. Auto: will do single threading for small d & short sequences. (both <= 100)
-    #[arg(short = 'm', long, value_enum, default_value_t = BackendMode::Auto)]
-    pub backend_mode: BackendMode,
+    #[arg(short = 'm', long, value_enum, default_value_t = BackendModeArg::Auto)]
+    pub backend_mode: BackendModeArg,
 
     /// Solver selection and configuration. Use --solver to pick;
     /// pass --bfgs-*, --lm-*, or --gn-* flags as appropriate.

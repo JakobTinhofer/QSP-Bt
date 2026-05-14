@@ -22,7 +22,7 @@ struct ProgramConfigSerialized {
 impl From<&ProgramConfig> for ProgramConfigSerialized {
     fn from(c: &ProgramConfig) -> Self {
         Self {
-            backend_mode: c.backend_mode,
+            backend_mode: BackendMode::from(c.backend_mode),
             solver: c.solver.to_config(),
             strategy: c.solver.strategy.clone(),
             target: c.target.clone(),
