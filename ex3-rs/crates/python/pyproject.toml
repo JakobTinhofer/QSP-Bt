@@ -10,4 +10,4 @@ dynamic = ["version"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 manifest-path = "Cargo.toml"
-module-name = "qsp-rs"
+module-name = "qsp_rs"

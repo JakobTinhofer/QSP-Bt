@@ -9,4 +9,7 @@ crate-type= ["cdylib"]
 
 [dependencies]
 qsp-rs-core.workspace = true
-pyo3 = {version="0.22", features = ["extension-module"]}
+pyo3 = {version="0.22", features = ["extension-module", "anyhow"]}
+numpy = "0.22"
+ndarray = "0.16"
+anyhow = "1"
