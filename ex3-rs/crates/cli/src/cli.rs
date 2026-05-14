@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::tasks::TaskType;
 use clap::{Args as ClapArgs, Parser, ValueEnum};
 use ndarray::Array1;
@@ -172,7 +174,7 @@ pub struct TargetConfig {
     /// "rand": random points that are either 1 or 0 (which are then mirrored, see parity)
     /// "rand-phase" random points that are like exp(iφ) with random φ ∈ [0, 2π)
     /// "gp,r,k" generalized parity target with r,k
-    #[arg(short='t', long, value_parser = TargetPattern::parse, default_value = "rand")]
+    #[arg(short='t', long, value_parser = TargetPattern::from_str, default_value = "rand")]
     pub target_pattern: TargetPattern,
 
     /// parity ("even" or "odd")

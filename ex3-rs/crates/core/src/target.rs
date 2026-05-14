@@ -3,7 +3,10 @@ use ndarray::Array1;
 use num_complex::Complex64;
 use rand::distr::{Distribution, Uniform};
 use serde::{Deserialize, Serialize};
-use std::{f64::consts::PI, f64::consts::TAU};
+use std::{
+    f64::consts::{PI, TAU},
+    str::FromStr,
+};
 
 use crate::utils::parse_usize_gt_0;
 
@@ -25,9 +28,11 @@ pub enum TargetPattern {
     DataRepeating(Array1<Complex64>),
 }
 
-impl TargetPattern {
-    pub fn parse(str: &str) -> Result<TargetPattern> {
-        let trimmed = str.trim();
+impl FromStr for TargetPattern {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+        let trimmed = s.trim();
 
         let parts: Vec<&str> = trimmed.split(",").collect();
         match parts.as_slice() {
@@ -52,7 +57,9 @@ impl TargetPattern {
             )),
         }
     }
+}
 
+impl TargetPattern {
     pub fn get_yhalf(&self, n: usize) -> Array1<Complex64> {
         let mut rng = rand::rng();
         match self {
