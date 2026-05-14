@@ -181,6 +181,19 @@ pub enum Parity {
     Odd,
 }
 
+impl FromStr for Parity {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+        let lower = s.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "even" | "e" => Ok(Self::Even),
+            "odd" | "o" => Ok(Self::Odd),
+            _ => anyhow::bail!(format!("Could not convert {s} into Parity type!")),
+        }
+    }
+}
+
 fn theta_k(k: usize, n_half: usize) -> f64 {
     assert!(k > 0 && k <= n_half, "Range for k: 1..N_HALF");
     return (((k as f64) / ((n_half + 1) as f64)) * (PI / 2.).powf(2.)).sqrt();

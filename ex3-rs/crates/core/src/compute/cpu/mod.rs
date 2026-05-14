@@ -1,5 +1,7 @@
 pub mod c2x2;
 pub mod qsp;
+use std::str::FromStr;
+
 use ndarray::{Array1, Array2, ArrayView1};
 use num_complex::{Complex64, ComplexFloat};
 use serde::{Deserialize, Serialize};
@@ -20,6 +22,20 @@ pub enum BackendMode {
     SingleThread,
     MultiThread,
     Auto,
+}
+
+impl FromStr for BackendMode {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lower = s.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "single" | "single-thread" | "single_thread" | "s" => Ok(Self::SingleThread),
+            "multi" | "multi-thread" | "multi_thread" | "m" => Ok(Self::MultiThread),
+            "auto" | "a" => Ok(Self::Auto),
+            _ => anyhow::bail!(format!("Could not convert {s} into BackendMode type!")),
+        }
+    }
 }
 
 pub struct CpuComputeBackend {

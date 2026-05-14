@@ -44,6 +44,22 @@ pub enum PhaseMap {
     MirrorIfPossible,
 }
 
+impl FromStr for PhaseMap {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+        let lower = s.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "none" | "n" => Ok(Self::None),
+            "mirror" | "m" => Ok(Self::Mirror),
+            "auto" | "mirror-if-possible" | "mirror_if_possible" | "o" | "a" => {
+                Ok(Self::MirrorIfPossible)
+            }
+            _ => anyhow::bail!(format!("Could not convert {s} into PhaseMap type!")),
+        }
+    }
+}
+
 impl PhaseMap {
     pub fn apply(&self, phase_in: &mut Array1<f64>, t: &TargetPoly) -> Result<()> {
         match (self, t.all_real()) {
