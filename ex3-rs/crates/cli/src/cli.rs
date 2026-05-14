@@ -1,13 +1,12 @@
-use crate::compute::ComputeBackend;
-use crate::compute::cpu::BackendMode;
-use crate::solvers::bfgs::BfgsOptions;
-use crate::solvers::lm::LmOptions;
-use crate::solvers::{PhaseMap, SolveMode, Solver};
-use crate::target::{Parity, TargetPattern};
 use crate::tasks::TaskType;
 use clap::{Args as ClapArgs, Parser, ValueEnum};
 use ndarray::Array1;
 use num_complex::Complex64;
+use qsp_rs_core::{
+    compute::{ComputeBackend, cpu::BackendMode},
+    solvers::{PhaseMap, SolveMode, Solver, bfgs::BfgsOptions, lm::LmOptions},
+    target::{Parity, TargetPattern},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]

@@ -2,6 +2,7 @@ use crate::{
     compute::ComputeBackend,
     solvers::{PhaseMap, SolveOutcome, Solver},
 };
+use anyhow::{Context, Result};
 use argmin::{
     core::{CostFunction, Executor, Gradient},
     solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
@@ -12,7 +13,7 @@ use ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 
-#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
+#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize, Default)]
 #[command(next_help_heading = "L-BFGS Options")]
 pub struct BfgsOptions {
     #[arg(
@@ -83,7 +84,7 @@ impl<'a, T: ComputeBackend> Gradient for QspProblem<'a, T> {
 }
 
 impl<B: ComputeBackend> Solver<B> for BfgsOptions {
-    fn run(&self, backend: &B, xs: ndarray::Array1<f64>, map: PhaseMap) -> SolveOutcome {
+    fn run(&self, backend: &B, xs: ndarray::Array1<f64>, map: PhaseMap) -> Result<SolveOutcome> {
         let problem = QspProblem {
             backend,
             map,
@@ -91,26 +92,28 @@ impl<B: ComputeBackend> Solver<B> for BfgsOptions {
         };
         let linesearch: MoreThuenteLineSearch<Array1<f64>, Array1<f64>, f64> =
             MoreThuenteLineSearch::new();
-        let solver: LBFGS<_, Array1<f64>, Array1<f64>, f64> = LBFGS::new(linesearch, self.mem)
-            .with_tolerance_grad(self.tol_grad)
-            .expect("Error on creating LBGFS!");
+        let solver: LBFGS<_, Array1<f64>, Array1<f64>, f64> =
+            LBFGS::new(linesearch, self.mem).with_tolerance_grad(self.tol_grad)?;
 
         let res = Executor::new(problem, solver)
             .configure(|state| state.param(xs).max_iters(self.max_iters))
-            .run()
-            .expect("Solver raised an error!");
+            .run()?;
 
-        let mut final_param = res.state.best_param.clone().unwrap();
-        map.apply(&mut final_param, backend.get_target())
-            .expect("...");
+        let mut final_param = res
+            .state
+            .best_param
+            .clone()
+            .context("Failed to clone output array.")?;
+
+        map.apply(&mut final_param, backend.get_target())?;
         let final_cost = res.state.best_cost;
         let iters = res.state.iter;
 
-        SolveOutcome {
+        Ok(SolveOutcome {
             phases: final_param,
             cost: final_cost,
             iterations: iters,
             term_reason: super::TerminationReason::Other,
-        }
+        })
     }
 }

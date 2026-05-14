@@ -2,6 +2,7 @@ use crate::{
     compute::ComputeBackend,
     solvers::{PhaseMap, SolveOutcome, Solver},
 };
+use anyhow::Result;
 use clap::Args as ClapArgs;
 use levenberg_marquardt::{LeastSquaresProblem, LevenbergMarquardt};
 use nalgebra::{DMatrix, DVector, Dyn, Owned};
@@ -84,12 +85,17 @@ pub struct LmOptions {
 }
 
 impl<T: ComputeBackend> Solver<T> for LmOptions {
-    fn run(&self, backend: &T, xs: ndarray::Array1<f64>, map: PhaseMap) -> super::SolveOutcome {
+    fn run(
+        &self,
+        backend: &T,
+        xs: ndarray::Array1<f64>,
+        map: PhaseMap,
+    ) -> Result<super::SolveOutcome> {
         let (vec, _) = xs.into_raw_vec_and_offset();
         let problem = QspLmProblem::new(backend, DVector::from_vec(vec), map);
         let (_res, _rep) = LevenbergMarquardt::new().minimize(problem);
         eprintln!("FINISHED LM!!!! {:?}", _rep);
-        SolveOutcome {
+        Ok(SolveOutcome {
             term_reason: match _rep.termination {
                 levenberg_marquardt::TerminationReason::Converged { ftol: _, xtol: _ } => {
                     super::TerminationReason::Converged
@@ -99,6 +105,6 @@ impl<T: ComputeBackend> Solver<T> for LmOptions {
             iterations: _rep.number_of_evaluations as u64,
             phases: ndarray::Array1::from_iter(_res.p.into_iter().map(|f| *f)),
             cost: _rep.objective_function,
-        }
+        })
     }
 }

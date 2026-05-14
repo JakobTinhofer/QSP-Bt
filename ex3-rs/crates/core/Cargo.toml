@@ -1,0 +1,17 @@
+[package]
+name="qsp-rs-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+num-complex = {version="0.4", features=["serde"] }
+ndarray = { version="0.16",  features = ["serde"] }
+nalgebra="0.34"
+argmin = "0.11"
+argmin-math = { version = "0.5", features = ["ndarray_v0_16-nolinalg"] }
+rand="0.10"
+clap = { version = "4", features = ["derive"] }
+rayon = "1"
+levenberg-marquardt = "0.15"
+anyhow = "1.0"
+serde = { version="1.0" , features = ["derive"] }

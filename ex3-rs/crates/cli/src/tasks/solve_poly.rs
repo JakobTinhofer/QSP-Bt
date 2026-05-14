@@ -1,13 +1,14 @@
 use crate::cli::{BLUE, GREEN, RESET, format_array, format_array_real};
-use crate::compute::ComputeBackend;
+
 use crate::data::datafile::{DataFileHeader, DataFileType};
-use crate::{
-    cli::ProgramConfig, compute::cpu::CpuComputeBackend, solvers::SolveOutcome, target::TargetPoly,
-    tasks::TaskTrait,
-};
+use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
 use ndarray::Array1;
+use qsp_rs_core::compute::ComputeBackend;
+use qsp_rs_core::compute::cpu::CpuComputeBackend;
+use qsp_rs_core::solvers::SolveOutcome;
+use qsp_rs_core::target::TargetPoly;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;

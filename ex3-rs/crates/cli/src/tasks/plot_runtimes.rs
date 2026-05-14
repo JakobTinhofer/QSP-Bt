@@ -1,15 +1,12 @@
 use std::time::Instant;
 
 use crate::cli::{GREEN, RESET};
-use crate::{
-    cli::ProgramConfig,
-    compute::cpu::CpuComputeBackend,
-    solvers::SolveOutcome,
-    target::{Parity, TargetPoly},
-    tasks::TaskTrait,
-};
+use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
+use qsp_rs_core::compute::cpu::CpuComputeBackend;
+use qsp_rs_core::solvers::SolveOutcome;
+use qsp_rs_core::target::{Parity, TargetPoly};
 use serde::{Deserialize, Serialize};
 
 #[derive(Args, Serialize, Deserialize)]

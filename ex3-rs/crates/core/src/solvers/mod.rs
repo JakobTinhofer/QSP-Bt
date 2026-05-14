@@ -119,7 +119,7 @@ impl SolveMode {
 }
 
 pub trait Solver<T: ComputeBackend> {
-    fn run(&self, backend: &T, xs: Array1<f64>, map: PhaseMap) -> SolveOutcome;
+    fn run(&self, backend: &T, xs: Array1<f64>, map: PhaseMap) -> Result<SolveOutcome>;
 
     fn solve(
         &self,
@@ -147,7 +147,7 @@ pub trait Solver<T: ComputeBackend> {
                 map,
                 seed,
                 init_perturb,
-            )),
+            )?),
             SolveMode::Hotstart(s, d) => {
                 solve_hotstart_seeded::<T, Self>(&self, backend, s, d, map, seed, init_perturb)
             }

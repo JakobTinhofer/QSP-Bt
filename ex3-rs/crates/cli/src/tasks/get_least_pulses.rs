@@ -1,9 +1,7 @@
-use crate::{
-    cli::ProgramConfig, compute::cpu::CpuComputeBackend, solvers::SolveOutcome, target::TargetPoly,
-    tasks::TaskTrait,
-};
+use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
+use qsp_rs_core::{compute::cpu::CpuComputeBackend, solvers::SolveOutcome, target::TargetPoly};
 use serde::{Deserialize, Serialize};
 
 #[derive(Args, Serialize, Deserialize)]

@@ -1,0 +1,12 @@
+[package]
+name="qsp-rs-py"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name="qsp_rs"
+crate-type= ["cdylib"]
+
+[dependencies]
+qsp-rs-core.workspace = true
+pyo3 = {version="0.22", features = ["extension-module"]}

@@ -14,7 +14,7 @@ pub fn solve_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     map: PhaseMap,
     seed: u64,
     init_perturb: f64,
-) -> SolveOutcome {
+) -> Result<SolveOutcome> {
     let mut rng = StdRng::seed_from_u64(seed);
     let init: Array1<f64> = if init_perturb > 1e-8 {
         (0..degree + 1)
@@ -77,7 +77,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         mut cost,
         mut iterations,
         mut term_reason,
-    } = solve_seeded(s, backend, degrees[0], map, seed, init_perturb);
+    } = solve_seeded(s, backend, degrees[0], map, seed, init_perturb)?;
     eprintln!("[cascade] step 0: degree {} → cost {:e}", degrees[0], cost);
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
@@ -97,7 +97,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
             cost,
             iterations,
             term_reason,
-        } = s.run(backend, padded, map);
+        } = s.run(backend, padded, map)?;
         eprintln!(
             "[cascade] step {}: degree {} → cost {:e} ({} iters)",
             i, d, cost, iterations
@@ -125,7 +125,7 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         cost: _,
         iterations: _,
         term_reason: _,
-    } = solve_seeded(s, backend, hotstart_degree, map, seed, init_perturb);
+    } = solve_seeded(s, backend, hotstart_degree, map, seed, init_perturb)?;
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
     let pertub: Array1<f64> = (0..main_degree - hotstart_degree)
@@ -133,7 +133,7 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         .collect();
     let padded = concatenate![Axis(0), phases, pertub];
 
-    let res = s.run(backend, padded, map);
+    let res = s.run(backend, padded, map)?;
     eprintln!(
         "[Hotstart] {} iterations, cost {:e}",
         res.iterations, res.cost
