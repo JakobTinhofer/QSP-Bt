@@ -1,16 +1,15 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use ndarray::Array1;
+use anyhow::anyhow;
+use ndarray::{Array1, arr1};
 use numpy::{Complex64, IntoPyArray, PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyComplex, PyDict};
 
+use qsp_rs_core::compute::ComputeBackend;
 use qsp_rs_core::{
-    compute::{
-        ComputeBackend,
-        cpu::{BackendMode, CpuComputeBackend},
-    },
+    compute::cpu::{BackendMode, CpuComputeBackend},
     solvers::{
         PhaseMap, SolveMode, SolveOutcome, Solver, TerminationReason, bfgs::BfgsOptions,
         lm::LmOptions,
@@ -242,10 +241,42 @@ fn solve_poly_with_pattern(
     )
 }
 
+#[pyfunction]
+#[pyo3(signature = (phases, x, *))]
+fn evaluate_qsp_poly<'py>(
+    py: Python<'py>,
+    phases: PyReadonlyArray1<'_, f64>,
+    x: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let phases_view = phases.as_array();
+
+    // check if argument is scalar (single x) or a numpy array of xs (vectorized)
+    if x.hasattr("__array__")? {
+        if let Ok(arr) = x.extract::<PyReadonlyArray1<'_, f64>>() {
+            return Ok(
+                CpuComputeBackend::evaluate_poly(&phases_view, &arr.as_array())
+                    .into_pyarray_bound(py)
+                    .into_any(),
+            );
+        }
+    } else {
+        if let Ok(scalar_x) = x.extract::<f64>() {
+            let xs = arr1(&[scalar_x]);
+            let ys = CpuComputeBackend::evaluate_poly(&phases_view, &xs.view());
+            return Ok(PyComplex::from_doubles_bound(py, ys[0].re, ys[1].im).into_any());
+        }
+    }
+
+    Err(PyTypeError::new_err(
+        "x must be a float or a 1-D numpy float64 array",
+    ))
+}
+
 #[pymodule]
 fn qsp_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySolveResult>()?;
     m.add_function(wrap_pyfunction!(solve_poly_with_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(solve_poly, m)?)?;
+    m.add_function(wrap_pyfunction!(evaluate_qsp_poly, m)?)?;
     Ok(())
 }
