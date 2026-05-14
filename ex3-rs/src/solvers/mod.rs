@@ -1,20 +1,21 @@
 use std::f64::consts::PI;
 
-use clap::ValueEnum;
-use ndarray::{Array1, Axis};
-
 use crate::{
     compute::ComputeBackend,
     solvers::strategies::{solve_cascade_seeded, solve_hotstart_seeded, solve_seeded},
     target::{Parity, TargetPoly},
     utils::parse_usize_gt_0,
 };
+use anyhow::Result;
+use clap::ValueEnum;
+use ndarray::{Array1, Axis};
+use serde::{Deserialize, Serialize};
 
 pub mod bfgs;
 pub mod lm;
 mod strategies;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TerminationReason {
     Converged,
     MaxItersReached,
@@ -23,15 +24,16 @@ pub enum TerminationReason {
     Other,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SolveOutcome {
+    #[serde(skip)]
     pub phases: Array1<f64>,
     pub cost: f64,
     pub iterations: u64,
     pub term_reason: TerminationReason,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize)]
 pub enum PhaseMap {
     /// pass on the phases as-is
     None,
@@ -44,7 +46,7 @@ pub enum PhaseMap {
 }
 
 impl PhaseMap {
-    pub fn apply(&self, phase_in: &mut Array1<f64>, t: &TargetPoly) -> Result<(), String> {
+    pub fn apply(&self, phase_in: &mut Array1<f64>, t: &TargetPoly) -> Result<()> {
         match (self, t.all_real()) {
             (PhaseMap::None, _) | (PhaseMap::MirrorIfPossible, false) => Ok(()),
             (PhaseMap::Mirror, true) | (PhaseMap::MirrorIfPossible, true) => {
@@ -61,18 +63,18 @@ impl PhaseMap {
                         .rev()
                         .map(|p| *p),
                 );
-                phase_in
-                    .append(Axis(0), copy.view())
-                    .map_err(|e| format!("Failed to mirror phases: {e:?}"))?;
+                phase_in.append(Axis(0), copy.view())?;
                 phase_in[0] += PI / 4.;
                 Ok(())
             }
-            (PhaseMap::Mirror, false) => Err(format!("Cannot do mirror if target isn't real!")),
+            (PhaseMap::Mirror, false) => {
+                anyhow::bail!(format!("Cannot do mirror if target isn't real!"))
+            }
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SolveMode {
     /// Direct solve at the given degree.
     Simple(usize),
@@ -85,7 +87,7 @@ pub enum SolveMode {
 }
 
 impl SolveMode {
-    pub fn parse(str: &str) -> Result<Self, String> {
+    pub fn parse(str: &str) -> Result<Self> {
         let trimmed = str.trim();
 
         let parts: Vec<&str> = trimmed.split(",").collect();
@@ -99,7 +101,7 @@ impl SolveMode {
                 parse_usize_gt_0(f, "cascade")?,
                 parse_usize_gt_0(s, "cascade")?,
             )),
-            _ => Err(format!("Could not parse solve mode: '{str}'")),
+            _ => anyhow::bail!(format!("Could not parse solve mode: '{str}'")),
         }
     }
 
@@ -125,7 +127,7 @@ pub trait Solver<T: ComputeBackend> {
         mode: SolveMode,
         map: PhaseMap,
         init_perturb: f64,
-    ) -> Result<SolveOutcome, String> {
+    ) -> Result<SolveOutcome> {
         self.solve_seeded(backend, mode, map, rand::random::<u64>(), init_perturb)
     }
 
@@ -136,7 +138,7 @@ pub trait Solver<T: ComputeBackend> {
         map: PhaseMap,
         seed: u64,
         init_perturb: f64,
-    ) -> Result<SolveOutcome, String> {
+    ) -> Result<SolveOutcome> {
         match mode {
             SolveMode::Simple(d) => Ok(solve_seeded::<T, Self>(
                 &self,

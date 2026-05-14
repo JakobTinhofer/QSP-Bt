@@ -1,8 +1,9 @@
+use anyhow::Result;
 use clap::ValueEnum;
 use ndarray::Array1;
 use num_complex::Complex64;
 use rand::distr::{Distribution, Uniform};
-
+use serde::{Deserialize, Serialize};
 use std::{f64::consts::PI, f64::consts::TAU};
 
 use crate::utils::parse_usize_gt_0;
@@ -16,7 +17,7 @@ pub struct TargetPoly {
     parity: Option<Parity>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TargetPattern {
     RandomPeaks,
     RandomPhases,
@@ -26,7 +27,7 @@ pub enum TargetPattern {
 }
 
 impl TargetPattern {
-    pub fn parse(str: &str) -> Result<TargetPattern, String> {
+    pub fn parse(str: &str) -> Result<TargetPattern> {
         let trimmed = str.trim();
 
         let parts: Vec<&str> = trimmed.split(",").collect();
@@ -36,20 +37,17 @@ impl TargetPattern {
             ["cnz-gate" | "c"] => Ok(TargetPattern::CNZGate),
             ["gp", r, k] => Ok(TargetPattern::GeneralizedParity {
                 r: parse_usize_gt_0(r, "gp")?,
-                k: k.parse()
-                    .map_err(|e| format!("Failed to parse k. Err: {e}"))?,
+                k: k.parse()?,
             }),
             [first, ..] if matches!(*first, "rand-peaks" | "rand-phases" | "gp") => {
-                Err(format!("Wrong number of arguments for '{}'", first))
+                anyhow::bail!(format!("Wrong number of arguments for '{}'", first))
             }
             _ => Ok(TargetPattern::DataRepeating(
                 trimmed
                     .split(',')
                     .map(|part| {
                         let cleaned = part.replace(char::is_whitespace, "");
-                        cleaned
-                            .parse::<Complex64>()
-                            .map_err(|e| format!("'{}': {}", part.trim(), e))
+                        cleaned.parse::<Complex64>()
                     })
                     .collect::<Result<_, _>>()?,
             )),
@@ -171,7 +169,7 @@ impl TargetPoly {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum Parity {
     Even,
     Odd,

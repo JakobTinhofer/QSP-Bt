@@ -1,11 +1,11 @@
-use ndarray::{Array1, Axis, concatenate, s};
-use rand::{RngExt, SeedableRng, rngs::StdRng};
-use std::f64::consts::PI;
-
 use crate::{
     compute::ComputeBackend,
     solvers::{PhaseMap, SolveOutcome, Solver},
 };
+use anyhow::Result;
+use ndarray::{Array1, Axis, concatenate, s};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
+use std::f64::consts::PI;
 
 pub fn solve_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     s: &S,
@@ -34,12 +34,12 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     map: PhaseMap,
     seed: u64,
     init_perturb: f64,
-) -> Result<SolveOutcome, String> {
+) -> Result<SolveOutcome> {
     if n_steps < 2 {
-        return Err(String::from("Cascade requires at least 2 Steps!"));
+        anyhow::bail!(String::from("Cascade requires at least 2 Steps!"));
     }
     if final_degree < 2 * n_steps {
-        return Err(format!(
+        anyhow::bail!(format!(
             "cascade: final_degree ({}) must be >= 2 * n_steps ({}) to keep parity-matched steps spaced by 2",
             final_degree,
             2 * n_steps
@@ -119,7 +119,7 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     map: PhaseMap,
     seed: u64,
     init_perturb: f64,
-) -> Result<SolveOutcome, String> {
+) -> Result<SolveOutcome> {
     let SolveOutcome {
         phases,
         cost: _,

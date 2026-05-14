@@ -9,9 +9,10 @@ use argmin::{
 use argmin_math::Error;
 use clap::Args as ClapArgs;
 use ndarray::Array1;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 
-#[derive(ClapArgs, Debug, Clone)]
+#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
 #[command(next_help_heading = "L-BFGS Options")]
 pub struct BfgsOptions {
     #[arg(

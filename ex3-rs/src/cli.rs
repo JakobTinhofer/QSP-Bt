@@ -1,16 +1,16 @@
-use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
-use ndarray::Array1;
-use num_complex::Complex64;
-use std::path::PathBuf;
-
 use crate::compute::ComputeBackend;
 use crate::compute::cpu::BackendMode;
 use crate::solvers::bfgs::BfgsOptions;
 use crate::solvers::lm::LmOptions;
 use crate::solvers::{PhaseMap, SolveMode, Solver};
 use crate::target::{Parity, TargetPattern};
+use crate::tasks::TaskType;
+use clap::{Args as ClapArgs, Parser, ValueEnum};
+use ndarray::Array1;
+use num_complex::Complex64;
+use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum SolverKind {
     /// Limited-memory BFGS (default; good for smooth, well-conditioned problems)
     Bfgs,
@@ -18,14 +18,15 @@ pub enum SolverKind {
     Lm,
 }
 
-#[derive(ClapArgs, Debug, Clone)]
+#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
 #[command(next_help_heading = "General solver options")]
-pub struct SolverCfg {
+pub struct SolverStrategy {
     /// Solve mode: "simple,D" — direct solve at degree D
     ///             "hotstart,S,D" — solve at degree S, then continue at degree D
     ///             "cascade,N,D" — N cascading steps up to degree D
     /// if running PlotRuntimes task, this will be interpreted as a ratio and scaled accordingly
     #[arg(short = 'M', long, value_parser = SolveMode::parse, default_value = "hotstart,20,60")]
+    #[serde(flatten)]
     pub mode: SolveMode,
 
     /// Maps the phases before the QSP unitary is constructed.
@@ -37,8 +38,29 @@ pub struct SolverCfg {
     #[arg(short = 'P', long, value_enum, default_value_t = PhaseMap::MirrorIfPossible)]
     pub phase_map: PhaseMap,
 
+    /// The max. magnitude of the first guess for the random phases
+    /// to initialize the solver. Choose 0 for mirrored phases to get faster
+    /// convergance and lower total phase values.
     #[arg(short = 'i', long, default_value = ".4")]
     pub init_perturb_mag: f64,
+}
+
+/// What gets serialized to the file: only the relevant solver's params.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SolverConfig {
+    Bfgs(BfgsOptions),
+    Lm(LmOptions),
+}
+
+impl SolverArgs {
+    /// Build the serializable form, picking only the active solver's options.
+    pub fn to_config(&self) -> SolverConfig {
+        match self.kind {
+            SolverKind::Bfgs => SolverConfig::Bfgs(self.bfgs.clone()),
+            SolverKind::Lm => SolverConfig::Lm(self.lm.clone()),
+        }
+    }
 }
 
 #[derive(ClapArgs, Debug, Clone)]
@@ -54,7 +76,7 @@ pub struct SolverArgs {
     pub lm: LmOptions,
 
     #[command(flatten)]
-    pub config: SolverCfg,
+    pub strategy: SolverStrategy,
 }
 
 impl SolverArgs {
@@ -66,55 +88,7 @@ impl SolverArgs {
     }
 }
 
-#[derive(Subcommand)]
-pub enum Task {
-    SolvePoly {
-        /// How long to make the target. Since the target is mirrored afterwars, this is half of the final length.
-        #[arg(short = 'n', long)]
-        target_half_len: usize,
-
-        /// Path for the solution output
-        #[arg(short = 'o', long)]
-        output: Option<PathBuf>,
-
-        /// Path for outputing the data formated to be drawn in gnuplot
-        #[arg(short = 'D', long)]
-        drawable: Option<PathBuf>,
-    },
-    PlotRuntimes {
-        /// Cutoff runtime in seconds
-        #[arg(short = 'r', long, default_value = "180")]
-        max_runtime: usize,
-
-        /// How large to make the steps between different tries
-        #[arg(short = 's', long, default_value = "5")]
-        target_len_step: usize,
-
-        /// How many phase parameters to use per point of the target
-        #[arg(short = 'R', long, default_value = "4")]
-        ratio_phases_to_target: f64,
-
-        #[arg(short = 'n', long, default_value = "3")]
-        avg_n: usize,
-
-        #[arg(long)]
-        force_degree_parity: bool,
-    },
-    GetLeastPulses {
-        #[arg(short = 'd')]
-        start_d: usize,
-
-        #[arg(short = 's', long, default_value = "1")]
-        reduce_step_d: usize,
-
-        #[arg(short = 'n', long)]
-        target_len: usize,
-
-        #[arg(short = 'e', long, default_value = "1e-6")]
-        max_error: f64,
-    },
-}
-#[derive(ClapArgs, Debug, Clone)]
+#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
 #[command(next_help_heading = "Target configuration")]
 pub struct TargetConfig {
     /// complex numbers with mod <= 1 seperated by commas (eg "0.5+0.3i, -0.2-0.7i, 0.1i") that will be repeated up to target length
@@ -129,12 +103,8 @@ pub struct TargetConfig {
     pub parity: Parity,
 }
 
-#[derive(Parser)]
-#[command(about = "Fit a QSP polynomial to the given sequence of target points.")]
-pub struct Args {
-    #[command(subcommand)]
-    pub task: Task,
-
+#[derive(ClapArgs, Debug, Clone)]
+pub struct ProgramConfig {
     /// Enable/disable multithreading for gradient, lossfunction evaluation. Auto: will do single threading for small d & short sequences. (both <= 100)
     #[arg(short = 'm', long, value_enum, default_value_t = BackendMode::Auto)]
     pub backend_mode: BackendMode,
@@ -146,6 +116,19 @@ pub struct Args {
 
     #[command(flatten)]
     pub target: TargetConfig,
+
+    #[arg(short = 'l', long)]
+    pub label: Option<String>,
+}
+
+#[derive(Parser)]
+#[command(about = "Fit a QSP polynomial to the given sequence of target points.")]
+pub struct Args {
+    #[command(subcommand)]
+    pub task: TaskType,
+
+    #[command(flatten)]
+    pub config: ProgramConfig,
 }
 
 pub const RED: &str = "\x1b[31m";

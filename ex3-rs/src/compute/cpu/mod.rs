@@ -3,6 +3,7 @@ pub mod qsp;
 use clap::ValueEnum;
 use ndarray::{Array1, Array2, ArrayView1};
 use num_complex::{Complex64, ComplexFloat};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     compute::{
@@ -15,7 +16,7 @@ use crate::{
     target::TargetPoly,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum BackendMode {
     SingleThread,
     MultiThread,

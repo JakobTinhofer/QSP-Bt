@@ -6,6 +6,7 @@ use clap::Args as ClapArgs;
 use levenberg_marquardt::{LeastSquaresProblem, LevenbergMarquardt};
 use nalgebra::{DMatrix, DVector, Dyn, Owned};
 use ndarray::ArrayView1;
+use serde::{Deserialize, Serialize};
 
 struct QspLmProblem<'a, T: ComputeBackend> {
     p: DVector<f64>,
@@ -67,7 +68,7 @@ impl<'a, T: ComputeBackend> LeastSquaresProblem<f64, Dyn, Dyn> for QspLmProblem<
     }
 }
 
-#[derive(ClapArgs, Debug, Clone)]
+#[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
 #[command(next_help_heading = "Levenberg-Marquardt Options")]
 pub struct LmOptions {
     #[arg(id = "lm_max_iters", long = "lm-max-iters", default_value = "500")]
