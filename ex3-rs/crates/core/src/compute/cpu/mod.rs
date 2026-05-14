@@ -325,7 +325,7 @@ impl ComputeBackend for CpuComputeBackend {
         &self.target
     }
 
-    fn evaluate_poly(&self, phases: &ArrayView1<f64>, xs: &ArrayView1<f64>) -> Array1<Complex64> {
+    fn evaluate_poly(phases: &ArrayView1<f64>, xs: &ArrayView1<f64>) -> Array1<Complex64> {
         qsp_poly(phases.as_slice().unwrap(), xs.as_slice().unwrap())
     }
 }

@@ -99,7 +99,7 @@ impl TaskTrait for SolvePolyTask {
                 "# Plottable polynomial evaluation in x \\in (-1,1) with ~2k points (x,theta,Re[P], Im[P])"
             )?;
             let xs = Array1::linspace(-1., 1., 2000);
-            let px = backend.evaluate_poly(&outcome.phases.view(), &xs.view());
+            let px = CpuComputeBackend::evaluate_poly(&outcome.phases.view(), &xs.view());
             for (x, p) in xs.iter().zip(px.iter()) {
                 writeln!(file, "{} {} {} {}", x, x.acos(), p.re, p.im,)?;
             }
