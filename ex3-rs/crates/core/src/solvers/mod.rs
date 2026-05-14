@@ -1,4 +1,4 @@
-use std::f64::consts::PI;
+use std::{f64::consts::PI, str::FromStr};
 
 use crate::{
     compute::ComputeBackend,
@@ -133,7 +133,7 @@ impl SolveMode {
     }
 }
 
-pub trait Solver<T: ComputeBackend> {
+pub trait Solver<T: ComputeBackend>: Send + Sync {
     fn run(&self, backend: &T, xs: Array1<f64>, map: PhaseMap) -> Result<SolveOutcome>;
 
     fn solve(
