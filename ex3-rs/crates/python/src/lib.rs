@@ -243,7 +243,7 @@ fn solve_poly_with_pattern(
 
 #[pyfunction]
 #[pyo3(signature = (phases, x, *))]
-fn evaluate_qsp_poly<'py>(
+fn evaluate_poly<'py>(
     py: Python<'py>,
     phases: PyReadonlyArray1<'_, f64>,
     x: &Bound<'py, PyAny>,
@@ -277,6 +277,6 @@ fn qsp_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySolveResult>()?;
     m.add_function(wrap_pyfunction!(solve_poly_with_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(solve_poly, m)?)?;
-    m.add_function(wrap_pyfunction!(evaluate_qsp_poly, m)?)?;
+    m.add_function(wrap_pyfunction!(evaluate_poly, m)?)?;
     Ok(())
 }
