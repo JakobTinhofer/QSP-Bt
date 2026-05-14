@@ -75,7 +75,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
 
-    for (i, &d) in degrees.iter().enumerate().skip(1) {
+    for &d in degrees.iter().skip(1) {
         let extra = (d + 1) - phases.len();
         if extra == 0 {
             continue;
