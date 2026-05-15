@@ -263,7 +263,7 @@ fn evaluate_poly<'py>(
         if let Ok(scalar_x) = x.extract::<f64>() {
             let xs = arr1(&[scalar_x]);
             let ys = CpuComputeBackend::evaluate_poly(&phases_view, &xs.view());
-            return Ok(PyComplex::from_doubles_bound(py, ys[0].re, ys[1].im).into_any());
+            return Ok(PyComplex::from_doubles_bound(py, ys[0].re, ys[0].im).into_any());
         }
     }
 
