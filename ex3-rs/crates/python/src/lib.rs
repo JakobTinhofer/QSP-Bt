@@ -17,7 +17,39 @@ use qsp_rs_core::{
     target::{Parity, TargetPattern, TargetPoly},
 };
 
-#[pyclass(name = "SolveResult", module = "qsp", frozen)]
+#[pyclass(name = "TargetPoly", module = "qsp_rs", frozen)]
+#[derive(Debug, Clone)]
+pub struct PyTargetPoly {
+    xs: Array1<f64>,
+    ys: Array1<Complex64>,
+    #[pyo3(get)]
+    n_half: usize,
+}
+
+#[pymethods]
+impl PyTargetPoly {
+    #[getter]
+    fn xs<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.xs.clone().into_pyarray_bound(py)
+    }
+
+    #[getter]
+    fn ys<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<Complex64>> {
+        self.ys.clone().into_pyarray_bound(py)
+    }
+
+    #[getter]
+    fn ks<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<usize>> {
+        PyArray1::from_iter_bound(py, 0..self.n_half)
+    }
+
+    #[getter]
+    fn thetas<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_iter_bound(py, self.xs.iter().map(|x| x.acos()))
+    }
+}
+
+#[pyclass(name = "SolveResult", module = "qsp_rs", frozen)]
 pub struct PySolveResult {
     #[pyo3(get)]
     cost: f64,
@@ -28,6 +60,8 @@ pub struct PySolveResult {
     termination: String,
     #[pyo3(get)]
     elapsed_ms: f64,
+    #[pyo3(get)]
+    target: PyTargetPoly,
 }
 
 #[pymethods]
@@ -107,6 +141,11 @@ fn __solve(
     let backend_md: BackendMode = backend_mode.parse()?;
 
     let solve_mode = SolveMode::parse(mode)?;
+    let pytarget = PyTargetPoly {
+        xs: target.xs.clone(),
+        ys: target.ys.clone(),
+        n_half: target.ys.len() / 2,
+    };
     let backend = CpuComputeBackend::new(target, backend_md);
 
     let solver_box: Box<dyn Solver<CpuComputeBackend>> = match solver.to_ascii_lowercase().as_str()
@@ -143,6 +182,7 @@ fn __solve(
         phases: outcome.phases,
         iterations: outcome.iterations,
         termination: termination_str(outcome.term_reason).to_string(),
+        target: pytarget,
         elapsed_ms,
     })
 }
@@ -177,7 +217,7 @@ fn solve_poly(
 ) -> PyResult<PySolveResult> {
     let parity: Parity = parity.parse()?;
     let ys_array = ys.as_array().to_owned();
-    let target = TargetPoly::new_forced_parity(ys_array, parity);
+    let target = TargetPoly::new_forced_parity(ys_array, parity)?;
 
     __solve(
         py,
@@ -275,6 +315,7 @@ fn evaluate_poly<'py>(
 #[pymodule]
 fn qsp_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySolveResult>()?;
+    m.add_class::<PyTargetPoly>()?;
     m.add_function(wrap_pyfunction!(solve_poly_with_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(solve_poly, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_poly, m)?)?;
