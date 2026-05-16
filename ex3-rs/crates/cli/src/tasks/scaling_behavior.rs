@@ -22,8 +22,6 @@ pub struct ScalingBehaviorTask {
     start_from_n: usize,
     #[arg(short = 'R', default_value = "5.5")]
     starting_phase_ratio: f64,
-    #[arg(short = 'd', default_value = "1")]
-    degree_reduction_step: usize,
     #[arg(long = "steps", default_value = "-1")]
     run_steps: i32,
 }
@@ -39,15 +37,18 @@ impl TaskTrait for ScalingBehaviorTask {
         let mut step = 0;
 
         while self.run_steps < 0 || step < self.run_steps {
-            let mut d = (current_target_length as f64 * self.starting_phase_ratio) as usize;
-            let mut last_vals: Option<(usize, usize, f64, f64, f64)> = None;
-            // TODO: Replace sequential scan with binary search
+            let mut lower_edge = 1;
+            let mut upper_edge =
+                (current_target_length as f64 * self.starting_phase_ratio) as usize;
 
-            loop {
+            let mut last_vals: Option<(usize, usize, f64, f64, f64)> = None;
+            let mut last_low: Option<(usize, usize, f64, f64, f64)> = None;
+            while lower_edge < upper_edge {
+                let d = (upper_edge - lower_edge) / 2 as usize + lower_edge;
+
                 let target = TargetPoly::from_pattern(&t.target_pattern, p, current_target_length);
                 let backend = CpuComputeBackend::new(target, b);
                 let mode = s.strategy.mode.rescale(d);
-
                 let mut nr_of_phases = 0;
                 let (mut avg_cost, mut avg_rt, mut avg_iter) = (0.0, 0.0, 0.0);
 
@@ -75,37 +76,35 @@ impl TaskTrait for ScalingBehaviorTask {
                     );
                 }
 
-                if avg_cost > self.max_error {
-                    if let Some((
-                        last_d,
-                        last_nr_phases,
-                        last_avg_cost,
-                        last_avg_rt,
-                        last_avg_iter,
-                    )) = last_vals
-                    {
-                        eprintln!(
-                            "[{GREEN}+{RESET}] Reached error limit. Last: d={last_d} cost={last_avg_cost:e} phases_n={last_nr_phases} rt={last_avg_rt}ms iter={last_avg_iter}"
-                        );
-                        println!(
-                            "{current_target_length} {last_d} {last_nr_phases} {last_avg_cost} {last_avg_rt} {last_avg_iter} 1",
-                        );
-                    } else {
-                        eprintln!(
-                            "[{YELLOW}!{RESET}] First iteration step already above error limit! Consider raising the tolerance...Current: d={d} cost={avg_cost:e} rt={avg_rt}ms iter={avg_iter}"
-                        );
-                        println!("{current_target_length} {d} {avg_cost} {avg_rt} {avg_iter} 0",);
-                    }
-                    eprintln!("\n\n");
-                    break;
-                }
-
-                if d <= 0 {
-                    anyhow::bail!("Never got reached error limit, even with d <= 0!");
+                if avg_cost < self.max_error {
+                    upper_edge = d;
+                    last_low = Some((d, nr_of_phases, avg_cost, avg_rt, avg_iter));
+                } else {
+                    lower_edge = d + 1;
                 }
                 last_vals = Some((d, nr_of_phases, avg_cost, avg_rt, avg_iter));
-                d -= self.degree_reduction_step;
             }
+
+            if let Some((last_d, last_nr_phases, last_avg_cost, last_avg_rt, last_avg_iter)) =
+                last_low
+            {
+                eprintln!(
+                    "[{GREEN}+{RESET}] Reached error limit. Last: d={last_d} cost={last_avg_cost:e} phases_n={last_nr_phases} rt={last_avg_rt}ms iter={last_avg_iter}"
+                );
+                println!(
+                    "{current_target_length} {last_d} {last_nr_phases} {last_avg_cost} {last_avg_rt} {last_avg_iter} 1",
+                );
+            } else if let Some((d, nr_phases, avg_cost, avg_rt, avg_iter)) = last_vals {
+                eprintln!(
+                    "[{YELLOW}!{RESET}] First iteration step already above error limit! Consider raising the tolerance...Current: d={d} cost={avg_cost:e} rt={avg_rt}ms iter={avg_iter}"
+                );
+                println!(
+                    "{current_target_length} {d} {nr_phases} {avg_cost} {avg_rt} {avg_iter} 0",
+                );
+            } else {
+                anyhow::bail!("No evaluations took place!");
+            }
+
             step += 1;
             current_target_length += self.length_step;
         }
