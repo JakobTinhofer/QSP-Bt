@@ -62,6 +62,8 @@ pub struct PySolveResult {
     elapsed_ms: f64,
     #[pyo3(get)]
     target: PyTargetPoly,
+    #[pyo3(get)]
+    total_phase: f64,
 }
 
 #[pymethods]
@@ -73,9 +75,10 @@ impl PySolveResult {
 
     fn __repr__(&self) -> String {
         format!(
-            "SolveResult(cost={:.3e}, n_phases={}, iterations={}, termination='{}', elapsed_ms={:.1})",
+            "SolveResult(cost={:.3e}, n_phases={}, total_phase={}, iterations={}, termination='{}', elapsed_ms={:.1})",
             self.cost,
             self.phases.len(),
+            self.total_phase,
             self.iterations,
             self.termination,
             self.elapsed_ms,
@@ -183,6 +186,7 @@ fn __solve(
         iterations: outcome.iterations,
         termination: termination_str(outcome.term_reason).to_string(),
         target: pytarget,
+        total_phase: outcome.phase_mag_sum,
         elapsed_ms,
     })
 }
