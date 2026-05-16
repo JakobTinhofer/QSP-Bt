@@ -1,12 +1,15 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use ndarray::{Array1, arr1};
 use numpy::{Complex64, IntoPyArray, PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict};
 
 use qsp_rs_core::compute::ComputeBackend;
+use qsp_rs_core::solvers::observe::{CancelToken, NoopObserver, ProgressObserver, SolverContext};
 use qsp_rs_core::target::{theta_k as theta_k_core, theta_k_continuous as theta_k_cont_core};
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
@@ -16,6 +19,10 @@ use qsp_rs_core::{
     },
     target::{Parity, TargetPattern, TargetPoly},
 };
+
+use crate::progress::PyObserver;
+
+mod progress;
 
 #[pyclass(name = "TargetPoly", module = "qsp_rs", frozen)]
 #[derive(Debug, Clone)]
@@ -139,11 +146,13 @@ fn __solve(
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
     lm_options: Option<&Bound<'_, PyDict>>,
+    progress: Option<&Bound<'_, PyAny>>,
+    progress_interval_ms: u64,
 ) -> PyResult<PySolveResult> {
     let phase_map_p: PhaseMap = phase_map.parse()?;
     let backend_md: BackendMode = backend_mode.parse()?;
-
     let solve_mode = SolveMode::parse(mode)?;
+
     let pytarget = PyTargetPoly {
         xs: target.xs.clone(),
         ys: target.ys.clone(),
@@ -157,16 +166,29 @@ fn __solve(
         "lm" => Box::new(build_lm(lm_options)?),
         other => return Err(PyValueError::new_err(format!("unknown solver: {other:?}"))),
     };
-
-    let start = std::time::Instant::now();
+    let cancel = CancelToken::new();
+    let callback: Option<Py<PyAny>> = progress.map(|p| p.clone().unbind());
+    let observer = Arc::new(PyObserver::new(
+        cancel.clone(),
+        callback,
+        Duration::from_millis(progress_interval_ms.max(10)),
+    ));
+    let ctx = SolverContext::new(cancel, observer);
+    let start = Instant::now();
     // Release GIL while code is running
     let outcome: anyhow::Result<SolveOutcome> = py.allow_threads(|| {
         catch_unwind(AssertUnwindSafe(|| match seed {
-            Some(s) => {
-                solver_box.solve_seeded(&backend, solve_mode, phase_map_p, s, init_perturb_mag)
-            }
-            None => solver_box.solve(&backend, solve_mode, phase_map_p, init_perturb_mag),
+            Some(s) => solver_box.solve_seeded(
+                &backend,
+                &ctx,
+                solve_mode,
+                phase_map_p,
+                s,
+                init_perturb_mag,
+            ),
+            None => solver_box.solve(&backend, &ctx, solve_mode, phase_map_p, init_perturb_mag),
         }))
+        .map(|res| res.map_err(|e| e.into()))
         .unwrap_or_else(|panic_payload| {
             let msg = panic_payload
                 .downcast_ref::<&'static str>()
@@ -175,6 +197,8 @@ fn __solve(
                 .unwrap_or_else(|| "<non-string panic payload>".to_string());
             Err(anyhow::anyhow!("solver panicked: {msg}"))
         })
+
+        // watcher drops => auto joins
     });
 
     let outcome = outcome.map_err(|e| PyRuntimeError::new_err(format!("{e:#}")))?;
@@ -204,6 +228,7 @@ fn __solve(
     seed             = None,
     bfgs_options     = None,
     lm_options       = None,
+    progress = None, progress_interval_ms = 100,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn solve_poly(
@@ -218,6 +243,8 @@ fn solve_poly(
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
     lm_options: Option<&Bound<'_, PyDict>>,
+    progress: Option<&Bound<'_, PyAny>>,
+    progress_interval_ms: u64,
 ) -> PyResult<PySolveResult> {
     let parity: Parity = parity.parse()?;
     let ys_array = ys.as_array().to_owned();
@@ -234,6 +261,8 @@ fn solve_poly(
         seed,
         bfgs_options,
         lm_options,
+        progress,
+        progress_interval_ms,
     )
 }
 
@@ -263,6 +292,7 @@ fn theta_k_continuous(k: f64, n_half: usize) -> PyResult<f64> {
     seed             = None,
     bfgs_options     = None,
     lm_options       = None,
+    progress = None, progress_interval_ms = 100,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn solve_poly_with_pattern(
@@ -278,6 +308,8 @@ fn solve_poly_with_pattern(
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
     lm_options: Option<&Bound<'_, PyDict>>,
+    progress: Option<&Bound<'_, PyAny>>,
+    progress_interval_ms: u64,
 ) -> PyResult<PySolveResult> {
     let pattern: TargetPattern = target_pattern.parse()?;
     let parity: Parity = parity.parse()?;
@@ -294,6 +326,8 @@ fn solve_poly_with_pattern(
         seed,
         bfgs_options,
         lm_options,
+        progress,
+        progress_interval_ms,
     )
 }
 

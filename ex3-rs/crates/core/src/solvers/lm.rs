@@ -1,8 +1,12 @@
+use std::{cell::Cell, sync::Arc};
+
 use crate::{
     compute::ComputeBackend,
-    solvers::{PhaseMap, SolveOutcome, Solver},
+    solvers::{
+        PhaseMap, SolveError, SolveOutcome, SolveResult, Solver,
+        observe::{CancelToken, ProgressObserver, ProgressReport, SolverContext, StageInfo},
+    },
 };
-use anyhow::Result;
 use levenberg_marquardt::{LeastSquaresProblem, LevenbergMarquardt};
 use nalgebra::{DMatrix, DVector, Dyn, Owned};
 use ndarray::ArrayView1;
@@ -14,10 +18,22 @@ struct QspLmProblem<'a, T: ComputeBackend> {
     j: DMatrix<f64>,
     backend: &'a T,
     map: PhaseMap,
+
+    cancel: CancelToken,
+    observer: Arc<dyn ProgressObserver>,
+    stage: StageInfo,
+    eval_count: Cell<u64>,
 }
 
 impl<'a, T: ComputeBackend> QspLmProblem<'a, T> {
-    fn new(backend: &'a T, init_xs: DVector<f64>, map: PhaseMap) -> Self {
+    fn new(
+        backend: &'a T,
+        init_xs: DVector<f64>,
+        map: PhaseMap,
+        cancel: CancelToken,
+        observer: Arc<dyn ProgressObserver>,
+        stage: StageInfo,
+    ) -> Self {
         let (r, j) = Self::get_jac_res(backend, &init_xs, map);
         Self {
             backend,
@@ -25,6 +41,10 @@ impl<'a, T: ComputeBackend> QspLmProblem<'a, T> {
             r,
             j,
             map,
+            cancel,
+            observer,
+            stage,
+            eval_count: Cell::new(0),
         }
     }
 
@@ -60,10 +80,25 @@ impl<'a, T: ComputeBackend> LeastSquaresProblem<f64, Dyn, Dyn> for QspLmProblem<
     }
 
     fn residuals(&self) -> Option<nalgebra::Vector<f64, Dyn, Self::ResidualStorage>> {
+        if self.cancel.is_cancelled() {
+            return None;
+        }
+
+        let n = self.eval_count.get() + 1;
+        self.eval_count.set(n);
+        self.observer.on_iter(ProgressReport {
+            stage: self.stage,
+            iter: n,
+            cost: 0.5 * self.r.norm_squared(),
+        });
+
         Some(self.r.clone())
     }
 
     fn jacobian(&self) -> Option<nalgebra::Matrix<f64, Dyn, Dyn, Self::JacobianStorage>> {
+        if self.cancel.is_cancelled() {
+            return None;
+        }
         Some(self.j.clone())
     }
 }
@@ -89,12 +124,26 @@ impl<T: ComputeBackend> Solver<T> for LmOptions {
     fn run(
         &self,
         backend: &T,
+        ctx: &SolverContext,
         xs: ndarray::Array1<f64>,
         map: PhaseMap,
-    ) -> Result<super::SolveOutcome> {
+        stage: StageInfo,
+    ) -> SolveResult {
         let (vec, _) = xs.into_raw_vec_and_offset();
-        let problem = QspLmProblem::new(backend, DVector::from_vec(vec), map);
+        let problem = QspLmProblem::new(
+            backend,
+            DVector::from_vec(vec),
+            map,
+            ctx.cancel.clone(),
+            ctx.observer.clone(),
+            stage,
+        );
         let (_res, _rep) = LevenbergMarquardt::new().minimize(problem);
+
+        if ctx.cancel.is_cancelled() {
+            return Err(SolveError::Cancelled);
+        }
+
         Ok(SolveOutcome::new(
             ndarray::Array1::from_iter(_res.p.into_iter().map(|f| *f)),
             _rep.objective_function,

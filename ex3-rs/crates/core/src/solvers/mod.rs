@@ -2,16 +2,21 @@ use std::{f64::consts::PI, str::FromStr};
 
 use crate::{
     compute::ComputeBackend,
-    solvers::strategies::{solve_cascade_seeded, solve_hotstart_seeded, solve_seeded},
+    solvers::{
+        observe::{SolverContext, StageInfo},
+        strategies::{solve_cascade_seeded, solve_hotstart_seeded, solve_seeded},
+    },
     target::{Parity, TargetPoly},
     utils::parse_usize_gt_0,
 };
 use anyhow::Result;
 use ndarray::{Array1, Axis};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 pub mod bfgs;
 pub mod lm;
+pub mod observe;
 mod strategies;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +27,32 @@ pub enum TerminationReason {
     Diverged,
     Other,
 }
+
+#[derive(Error, Debug)]
+#[error("invalid strategy parameters: {message}")]
+pub struct StrategyError {
+    pub message: String,
+}
+
+impl StrategyError {
+    pub fn new(msg: impl Into<String>) -> Self {
+        Self {
+            message: msg.into(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SolveError {
+    #[error("solver cancelled")]
+    Cancelled,
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+    #[error("Error with ")]
+    StrategyError(#[from] StrategyError),
+}
+
+pub type SolveResult<T = SolveOutcome> = Result<T, SolveError>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SolveOutcome {
@@ -153,40 +184,51 @@ impl SolveMode {
 }
 
 pub trait Solver<T: ComputeBackend>: Send + Sync {
-    fn run(&self, backend: &T, xs: Array1<f64>, map: PhaseMap) -> Result<SolveOutcome>;
+    fn run(
+        &self,
+        backend: &T,
+        ctx: &SolverContext,
+        xs: Array1<f64>,
+        map: PhaseMap,
+        stage: StageInfo,
+    ) -> SolveResult;
 
     fn solve(
         &self,
         backend: &T,
+        ctx: &SolverContext,
         mode: SolveMode,
         map: PhaseMap,
         init_perturb: f64,
-    ) -> Result<SolveOutcome> {
-        self.solve_seeded(backend, mode, map, rand::random::<u64>(), init_perturb)
+    ) -> SolveResult {
+        self.solve_seeded(backend, ctx, mode, map, rand::random::<u64>(), init_perturb)
     }
 
     fn solve_seeded(
         &self,
         backend: &T,
+        ctx: &SolverContext,
         mode: SolveMode,
         map: PhaseMap,
         seed: u64,
         init_perturb: f64,
-    ) -> Result<SolveOutcome> {
+    ) -> SolveResult {
         match mode {
             SolveMode::Simple(d) => Ok(solve_seeded::<T, Self>(
                 &self,
                 backend,
+                ctx,
                 d,
                 map,
                 seed,
                 init_perturb,
+                None,
             )?),
             SolveMode::Hotstart(s, d) => {
-                solve_hotstart_seeded::<T, Self>(&self, backend, s, d, map, seed, init_perturb)
+                solve_hotstart_seeded::<T, Self>(&self, backend, ctx, s, d, map, seed, init_perturb)
             }
             SolveMode::Cascade(n, d) => {
-                solve_cascade_seeded::<T, Self>(&self, backend, n, d, map, seed, init_perturb)
+                solve_cascade_seeded::<T, Self>(&self, backend, ctx, n, d, map, seed, init_perturb)
             }
         }
     }

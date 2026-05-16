@@ -3,6 +3,7 @@ use anyhow::Result;
 use clap::Parser;
 mod cli;
 mod data;
+mod observe;
 mod tasks;
 
 fn main() -> Result<()> {

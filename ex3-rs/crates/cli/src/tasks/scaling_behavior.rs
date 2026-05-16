@@ -2,7 +2,7 @@ use crate::cli::{BLUE, GREEN, PhaseMapArg, RESET, YELLOW};
 use clap::Args;
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
-    solvers::PhaseMap,
+    solvers::{PhaseMap, observe::SolverContext},
     target::{Parity, TargetPoly},
 };
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,7 @@ impl TaskTrait for ScalingBehaviorTask {
                     let now = Instant::now();
                     let res = s.get_solver::<CpuComputeBackend>().solve(
                         &backend,
+                        &SolverContext::default(),
                         mode,
                         PhaseMap::from(s.strategy.phase_map),
                         s.strategy.init_perturb_mag,

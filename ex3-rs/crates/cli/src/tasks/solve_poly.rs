@@ -1,17 +1,21 @@
-use crate::cli::{BLUE, GREEN, RESET, format_array, format_array_real};
+use crate::cli::{BLUE, GREEN, RESET, format_array_real};
 
 use crate::data::datafile::{DataFileHeader, DataFileType};
+use crate::observe::CliObserver;
 use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
 use ndarray::Array1;
 use qsp_rs_core::compute::ComputeBackend;
 use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
+use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
 use qsp_rs_core::solvers::{PhaseMap, SolveOutcome};
 use qsp_rs_core::target::{Parity, TargetPoly};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 #[derive(Clone, Args, Serialize, Deserialize)]
@@ -42,29 +46,45 @@ impl TaskTrait for SolvePolyTask {
             cfg.solver.strategy, cfg.backend_mode
         );
 
-        println!("x:\n{}", format_array_real(&backend.get_target().xs, 3));
-        println!("y:\n{}", format_array(&backend.get_target().ys, 3));
+        //println!("x:\n{}", format_array_real(&backend.get_target().xs, 3));
+        //println!("y:\n{}", format_array(&backend.get_target().ys, 3));
 
         let start = Instant::now();
-        let outcome: SolveOutcome = cfg
-            .solver
-            .get_solver::<CpuComputeBackend>()
-            .solve(
-                &backend,
-                cfg.solver.strategy.mode,
-                PhaseMap::from(cfg.solver.strategy.phase_map),
-                cfg.solver.strategy.init_perturb_mag,
-            )
-            .expect("Solver failed!");
+        let cancel = CancelToken::new();
+
+        {
+            let cancel = cancel.clone();
+            let presses = Arc::new(AtomicUsize::new(0));
+            ctrlc::set_handler(move || {
+                let n = presses.fetch_add(1, Ordering::Relaxed);
+                if n == 0 {
+                    eprintln!("\nInterrupting (press Ctrl-C again to force exit)…");
+                    cancel.cancel();
+                } else {
+                    std::process::exit(130);
+                }
+            })?;
+        }
+
+        let observer = Arc::new(CliObserver::new());
+        let ctx = SolverContext::new(cancel, observer.clone());
+
+        let outcome: SolveOutcome = cfg.solver.get_solver::<CpuComputeBackend>().solve(
+            &backend,
+            &ctx,
+            cfg.solver.strategy.mode,
+            PhaseMap::from(cfg.solver.strategy.phase_map),
+            cfg.solver.strategy.init_perturb_mag,
+        )?;
 
         let elapsed = start.elapsed();
 
-        println!(
+        observer.println(format!(
             "[{GREEN}+{RESET}] Finished solving! Elapsed: {:?}. Final loss: {:e}. Resulting phases: \n{}",
             elapsed,
             outcome.cost,
             format_array_real(&outcome.phases, 5)
-        );
+        ))?;
 
         if let Some(path) = &self.output {
             let header = DataFileHeader::new(
@@ -103,7 +123,7 @@ impl TaskTrait for SolvePolyTask {
             for (x, p) in xs.iter().zip(px.iter()) {
                 writeln!(file, "{} {} {} {}", x, x.acos(), p.re, p.im,)?;
             }
-            println!("Wrote drawing data to '{}'", path.to_string_lossy());
+            eprintln!("Wrote drawing data to '{}'", path.to_string_lossy());
         }
 
         Ok(())
