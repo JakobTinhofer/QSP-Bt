@@ -33,7 +33,7 @@ impl TaskTrait for SolvePolyTask {
                 &cfg.target.target_pattern,
                 Parity::from(cfg.target.parity),
                 self.target_half_len,
-            ),
+            )?,
             BackendMode::from(cfg.backend_mode),
         );
 

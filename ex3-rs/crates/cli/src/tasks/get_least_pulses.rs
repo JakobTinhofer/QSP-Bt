@@ -34,7 +34,7 @@ impl TaskTrait for GetLeastPulsesTask {
         let s = cfg.solver;
 
         let backend = CpuComputeBackend::new(
-            TargetPoly::from_pattern(&t.target_pattern, Parity::from(t.parity), self.target_len),
+            TargetPoly::from_pattern(&t.target_pattern, Parity::from(t.parity), self.target_len)?,
             b,
         );
 

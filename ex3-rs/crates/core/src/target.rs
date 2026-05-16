@@ -143,7 +143,7 @@ impl TargetPoly {
         }
     }
 
-    pub fn new_forced_parity(target_y_half: Array1<Complex64>, parity: Parity) -> Self {
+    pub fn new_forced_parity(target_y_half: Array1<Complex64>, parity: Parity) -> Result<Self> {
         let n_half = target_y_half.len();
         let mut s = Self {
             xs: Array1::zeros(2 * n_half),
@@ -157,7 +157,7 @@ impl TargetPoly {
             Parity::Odd => -1.,
         };
         for i in 0..n_half {
-            let t = theta_k(i + 1, n_half);
+            let t = theta_k(i + 1, n_half)?;
             s.thetas[n_half + i] = t;
             s.thetas[n_half - i - 1] = PI - t;
             s.xs[n_half + i] = t.cos();
@@ -165,13 +165,13 @@ impl TargetPoly {
             s.ys[n_half + i] = target_y_half[i];
             s.ys[n_half - i - 1] = parity_sign * target_y_half[i];
         }
-        s
+        Ok(s)
     }
 
-    pub fn from_pattern(bp: &TargetPattern, p: Parity, n: usize) -> Self {
-        let mut t = Self::new_forced_parity(bp.get_yhalf(n), p);
+    pub fn from_pattern(bp: &TargetPattern, p: Parity, n: usize) -> Result<Self> {
+        let mut t = Self::new_forced_parity(bp.get_yhalf(n), p)?;
         t.pattern = Some(bp.clone());
-        t
+        Ok(t)
     }
 }
 
@@ -194,7 +194,18 @@ impl FromStr for Parity {
     }
 }
 
-fn theta_k(k: usize, n_half: usize) -> f64 {
-    assert!(k > 0 && k <= n_half, "Range for k: 1..N_HALF");
-    return (((k as f64) / ((n_half + 1) as f64)) * (PI / 2.).powf(2.)).sqrt();
+pub fn theta_k(k: usize, n_half: usize) -> anyhow::Result<f64> {
+    anyhow::ensure!(k > 0 && k <= n_half, "Range for k: 1..N_HALF");
+    Ok((((k as f64) / ((n_half + 1) as f64)) * (PI / 2.).powf(2.)).sqrt())
+}
+
+pub fn theta_k_continuous(k: f64, n_half: usize) -> anyhow::Result<f64> {
+    anyhow::ensure!(
+        k <= n_half as f64,
+        "Range for k (continuous): |k| <= N_HALF"
+    );
+    Ok(
+        ((k.abs() / ((n_half + 1) as f64)) * (PI / 2.).powf(2.)).sqrt()
+            * (if k >= 0. { 1. } else { -1. }),
+    )
 }

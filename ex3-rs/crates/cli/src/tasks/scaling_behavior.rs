@@ -59,7 +59,7 @@ impl TaskTrait for ScalingBehaviorTask {
                     d
                 };
 
-                let target = TargetPoly::from_pattern(&t.target_pattern, p, current_target_length);
+                let target = TargetPoly::from_pattern(&t.target_pattern, p, current_target_length)?;
                 let backend = CpuComputeBackend::new(target, b);
                 let mode = s.strategy.mode.rescale(parity_adjusted_d);
                 let mut nr_of_phases = 0;
