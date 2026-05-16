@@ -30,6 +30,25 @@ pub struct SolveOutcome {
     pub cost: f64,
     pub iterations: u64,
     pub term_reason: TerminationReason,
+    pub phase_mag_sum: f64,
+}
+
+impl SolveOutcome {
+    pub fn new(
+        phases: Array1<f64>,
+        cost: f64,
+        iterations: u64,
+        term_reason: TerminationReason,
+    ) -> Self {
+        let phase_mag_sum = phases.iter().map(|p| p.abs()).sum();
+        Self {
+            phases,
+            cost,
+            iterations,
+            term_reason,
+            phase_mag_sum,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

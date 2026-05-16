@@ -71,6 +71,7 @@ impl TaskTrait for PlotRuntimesTask {
                 cost: f_err,
                 iterations: _,
                 term_reason: _,
+                phase_mag_sum: _,
             } = s.get_solver::<CpuComputeBackend>().solve(
                 &backend,
                 mode,

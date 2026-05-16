@@ -44,6 +44,7 @@ impl TaskTrait for GetLeastPulsesTask {
                 cost: f_err,
                 iterations: _,
                 term_reason: _,
+                phase_mag_sum: _,
             } = s
                 .get_solver::<CpuComputeBackend>()
                 .solve(

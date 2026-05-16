@@ -110,11 +110,35 @@ impl<B: ComputeBackend> Solver<B> for BfgsOptions {
         let final_cost = res.state.best_cost;
         let iters = res.state.iter;
 
-        Ok(SolveOutcome {
-            phases: final_param,
-            cost: final_cost,
-            iterations: iters,
-            term_reason: super::TerminationReason::Other,
-        })
+        Ok(SolveOutcome::new(
+            final_param,
+            final_cost,
+            iters,
+            match res.state.termination_status {
+                argmin::core::TerminationStatus::Terminated(termination_reason) => {
+                    match termination_reason {
+                        argmin::core::TerminationReason::MaxItersReached => {
+                            super::TerminationReason::MaxItersReached
+                        }
+                        argmin::core::TerminationReason::TargetCostReached => {
+                            super::TerminationReason::Converged
+                        }
+                        argmin::core::TerminationReason::Interrupt => {
+                            super::TerminationReason::Other
+                        }
+                        argmin::core::TerminationReason::SolverConverged => {
+                            super::TerminationReason::Converged
+                        }
+                        argmin::core::TerminationReason::Timeout => super::TerminationReason::Other,
+                        argmin::core::TerminationReason::SolverExit(_) => {
+                            super::TerminationReason::Other
+                        }
+                    }
+                }
+                argmin::core::TerminationStatus::NotTerminated => {
+                    anyhow::bail!("Solver exited with status NotTerminated!")
+                }
+            },
+        ))
     }
 }
