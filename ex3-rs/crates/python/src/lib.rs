@@ -1,6 +1,5 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use anyhow::anyhow;
 use ndarray::{Array1, arr1};
 use numpy::{Complex64, IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
@@ -8,6 +7,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict};
 
 use qsp_rs_core::compute::ComputeBackend;
+use qsp_rs_core::target::{theta_k as theta_k_core, theta_k_continuous as theta_k_cont_core};
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
     solvers::{
@@ -234,6 +234,18 @@ fn solve_poly(
 }
 
 #[pyfunction]
+#[pyo3(signature=(k,n_half))]
+fn theta_k(k: usize, n_half: usize) -> PyResult<f64> {
+    Ok(theta_k_core(k, n_half)?)
+}
+
+#[pyfunction]
+#[pyo3(signature=(k,n_half))]
+fn theta_k_continuous(k: f64, n_half: usize) -> PyResult<f64> {
+    Ok(theta_k_cont_core(k, n_half)?)
+}
+
+#[pyfunction]
 #[pyo3(signature = (
     target_half_len,
     target_pattern,
@@ -265,7 +277,7 @@ fn solve_poly_with_pattern(
 ) -> PyResult<PySolveResult> {
     let pattern: TargetPattern = target_pattern.parse()?;
     let parity: Parity = parity.parse()?;
-    let target = TargetPoly::from_pattern(&pattern, parity, target_half_len);
+    let target = TargetPoly::from_pattern(&pattern, parity, target_half_len)?;
 
     __solve(
         py,
@@ -319,5 +331,7 @@ fn qsp_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(solve_poly_with_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(solve_poly, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_poly, m)?)?;
+    m.add_function(wrap_pyfunction!(theta_k, m)?)?;
+    m.add_function(wrap_pyfunction!(theta_k_continuous, m)?)?;
     Ok(())
 }
