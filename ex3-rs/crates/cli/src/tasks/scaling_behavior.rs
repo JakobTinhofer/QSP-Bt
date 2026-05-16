@@ -80,9 +80,10 @@ impl TaskTrait for ScalingBehaviorTask {
                     );
                 }
 
+                last_vals = Some((d, nr_of_phases, avg_cost, avg_rt, avg_iter, avg_tot_phase));
                 if avg_cost < self.max_error {
                     upper_edge = d;
-                    last_low = last_vals;
+                    last_low = last_vals.clone();
                 } else {
                     lower_edge = d + 1;
                 }
