@@ -71,7 +71,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
         mut cost,
         mut iterations,
         mut term_reason,
-        mut phase_mag_sum,
+        phase_mag_sum: _,
     } = solve_seeded(s, backend, degrees[0], map, seed, init_perturb)?;
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
@@ -91,7 +91,7 @@ pub fn solve_cascade_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
             cost,
             iterations,
             term_reason,
-            phase_mag_sum,
+            phase_mag_sum: _,
         } = s.run(backend, padded, map)?;
     }
     Ok(SolveOutcome::new(phases, cost, iterations, term_reason))
