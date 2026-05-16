@@ -1,4 +1,4 @@
-use crate::cli::{BLUE, GREEN, RESET, YELLOW};
+use crate::cli::{BLUE, GREEN, PhaseMapArg, RESET, YELLOW};
 use clap::Args;
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
@@ -24,6 +24,8 @@ pub struct ScalingBehaviorTask {
     starting_phase_ratio: f64,
     #[arg(long = "steps", default_value = "-1")]
     run_steps: i32,
+    #[arg(long)]
+    dont_force_parity: bool,
 }
 
 impl TaskTrait for ScalingBehaviorTask {
@@ -45,15 +47,25 @@ impl TaskTrait for ScalingBehaviorTask {
             let mut last_low: Option<(usize, usize, f64, f64, f64, f64)> = None;
             while lower_edge < upper_edge {
                 let d = (upper_edge - lower_edge) / 2 as usize + lower_edge;
+                let parity_adjusted_d = if !self.dont_force_parity {
+                    match (s.strategy.phase_map, t.target_pattern.all_real()) {
+                        (PhaseMapArg::Mirror, _) | (PhaseMapArg::MirrorIfPossible, true) => d,
+                        _ => match (d % 2, p) {
+                            (0, Parity::Odd) | (1, Parity::Even) => d + 1,
+                            _ => d,
+                        },
+                    }
+                } else {
+                    d
+                };
 
                 let target = TargetPoly::from_pattern(&t.target_pattern, p, current_target_length);
                 let backend = CpuComputeBackend::new(target, b);
-                let mode = s.strategy.mode.rescale(d);
+                let mode = s.strategy.mode.rescale(parity_adjusted_d);
                 let mut nr_of_phases = 0;
                 let (mut avg_cost, mut avg_rt, mut avg_iter, mut avg_tot_phase) =
                     (0.0, 0.0, 0.0, 0.0);
 
-                last_vals = Some((d, nr_of_phases, avg_cost, avg_rt, avg_iter, avg_tot_phase));
                 for i in 0..self.avg_n {
                     let now = Instant::now();
                     let res = s.get_solver::<CpuComputeBackend>().solve(
@@ -79,8 +91,14 @@ impl TaskTrait for ScalingBehaviorTask {
                         res.iterations
                     );
                 }
-
-                last_vals = Some((d, nr_of_phases, avg_cost, avg_rt, avg_iter, avg_tot_phase));
+                last_vals = Some((
+                    parity_adjusted_d,
+                    nr_of_phases,
+                    avg_cost,
+                    avg_rt,
+                    avg_iter,
+                    avg_tot_phase,
+                ));
                 if avg_cost < self.max_error {
                     upper_edge = d;
                     last_low = last_vals.clone();
