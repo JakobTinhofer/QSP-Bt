@@ -233,7 +233,7 @@ fn __solve(
 #[allow(clippy::too_many_arguments)]
 fn solve_poly(
     py: Python<'_>,
-    ys: PyReadonlyArray1<'_, Complex64>,
+    ys: &Bound<'_, PyAny>,
     parity: &str,
     solver: &str,
     mode: &str,
@@ -246,6 +246,12 @@ fn solve_poly(
     progress: Option<&Bound<'_, PyAny>>,
     progress_interval_ms: u64,
 ) -> PyResult<PySolveResult> {
+    let np = py.import("numpy")?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("dtype", np.getattr("complex128")?)?;
+    let ys_any = np.call_method("asarray", (ys,), Some(&kwargs))?;
+    let ys: PyReadonlyArray1<'_, Complex64> = ys_any.extract()?;
+
     let parity: Parity = parity.parse()?;
     let ys_array = ys.as_array().to_owned();
     let target = TargetPoly::new_forced_parity(ys_array, parity)?;
