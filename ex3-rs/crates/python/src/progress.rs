@@ -113,7 +113,7 @@ impl ProgressObserver for PyObserver {
                 self.last_seen_gen.store(snap.generation, Ordering::Relaxed);
             }
 
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             let _ = dict.set_item("stage_index", snap.stage_index);
             let _ = dict.set_item("stage_total", snap.stage_total);
             let _ = dict.set_item("stage_degree", snap.stage_degree);

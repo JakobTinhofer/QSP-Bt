@@ -4,12 +4,12 @@ use std::time::{Duration, Instant};
 
 use ndarray::{Array1, arr1};
 use numpy::{Complex64, IntoPyArray, PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict};
 
 use qsp_rs_core::compute::ComputeBackend;
-use qsp_rs_core::solvers::observe::{CancelToken, NoopObserver, ProgressObserver, SolverContext};
+use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
 use qsp_rs_core::target::{theta_k as theta_k_core, theta_k_continuous as theta_k_cont_core};
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
@@ -37,22 +37,22 @@ pub struct PyTargetPoly {
 impl PyTargetPoly {
     #[getter]
     fn xs<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.xs.clone().into_pyarray_bound(py)
+        self.xs.clone().into_pyarray(py)
     }
 
     #[getter]
     fn ys<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<Complex64>> {
-        self.ys.clone().into_pyarray_bound(py)
+        self.ys.clone().into_pyarray(py)
     }
 
     #[getter]
     fn ks<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<usize>> {
-        PyArray1::from_iter_bound(py, 0..self.n_half)
+        PyArray1::from_iter(py, 0..self.n_half)
     }
 
     #[getter]
     fn thetas<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        PyArray1::from_iter_bound(py, self.xs.iter().map(|x| x.acos()))
+        PyArray1::from_iter(py, self.xs.iter().map(|x| x.acos()))
     }
 }
 
@@ -77,7 +77,7 @@ pub struct PySolveResult {
 impl PySolveResult {
     #[getter]
     fn phases<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.phases.clone().into_pyarray_bound(py)
+        self.phases.clone().into_pyarray(py)
     }
 
     fn __repr__(&self) -> String {
@@ -345,7 +345,7 @@ fn evaluate_poly<'py>(
         if let Ok(arr) = x.extract::<PyReadonlyArray1<'_, f64>>() {
             return Ok(
                 CpuComputeBackend::evaluate_poly(&phases_view, &arr.as_array())
-                    .into_pyarray_bound(py)
+                    .into_pyarray(py)
                     .into_any(),
             );
         }
@@ -353,7 +353,7 @@ fn evaluate_poly<'py>(
         if let Ok(scalar_x) = x.extract::<f64>() {
             let xs = arr1(&[scalar_x]);
             let ys = CpuComputeBackend::evaluate_poly(&phases_view, &xs.view());
-            return Ok(PyComplex::from_doubles_bound(py, ys[0].re, ys[0].im).into_any());
+            return Ok(PyComplex::from_doubles(py, ys[0].re, ys[0].im).into_any());
         }
     }
 
