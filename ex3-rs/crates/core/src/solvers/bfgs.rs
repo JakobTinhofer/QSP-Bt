@@ -170,13 +170,12 @@ impl<B: ComputeBackend> Solver<B> for BfgsOptions {
             return Err(SolveError::Cancelled);
         }
         let res = exec_result.map_err(|e| SolveError::Other(e.into()))?;
-        let mut final_param = res
+        let final_param = res
             .state
             .best_param
             .clone()
             .context("Failed to clone output array.")?;
 
-        map.apply(&mut final_param, backend.get_target())?;
         let final_cost = res.state.best_cost;
         let iters = res.state.iter;
 

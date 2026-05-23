@@ -213,7 +213,7 @@ pub trait Solver<T: ComputeBackend>: Send + Sync {
         seed: u64,
         init_perturb: f64,
     ) -> SolveResult {
-        match mode {
+        let mut res = match mode {
             SolveMode::Simple(d) => Ok(solve_seeded::<T, Self>(
                 &self,
                 backend,
@@ -230,6 +230,10 @@ pub trait Solver<T: ComputeBackend>: Send + Sync {
             SolveMode::Cascade(n, d) => {
                 solve_cascade_seeded::<T, Self>(&self, backend, ctx, n, d, map, seed, init_perturb)
             }
-        }
+        }?;
+        // Apply the map so the user gets returned the complete
+        // phases not just the ones used by the solver
+        map.apply(&mut res.phases, backend.get_target())?;
+        Ok(res)
     }
 }

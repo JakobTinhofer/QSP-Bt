@@ -197,8 +197,6 @@ fn __solve(
                 .unwrap_or_else(|| "<non-string panic payload>".to_string());
             Err(anyhow::anyhow!("solver panicked: {msg}"))
         })
-
-        // watcher drops => auto joins
     });
 
     let outcome = outcome.map_err(|e| PyRuntimeError::new_err(format!("{e:#}")))?;

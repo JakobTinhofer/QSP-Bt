@@ -79,14 +79,11 @@ impl ProgressObserver for PyObserver {
     }
 
     fn on_iter(&self, u: ProgressReport) {
-        // Hot path: just stash the latest values.
         self.snap.iter.store(u.iter, Ordering::Relaxed);
         self.snap
             .cost_bits
             .store(u.cost.to_bits(), Ordering::Relaxed);
 
-        // Throttled: every py_interval ms, reacquire the GIL on the main thread
-        // to (1) run pending signal handlers, (2) dispatch to the Python callback.
         let now = Instant::now();
         {
             let mut last = self.last_py_call.lock().unwrap();
@@ -97,7 +94,6 @@ impl ProgressObserver for PyObserver {
         }
 
         Python::with_gil(|py| {
-            // check_signals works here because we're on the main thread.
             if py.check_signals().is_err() {
                 self.cancel.cancel();
                 return;
