@@ -25,7 +25,7 @@ pub struct BfgsOptions {
 impl Default for BfgsOptions {
     fn default() -> Self {
         Self {
-            max_iters: 500000,
+            max_iters: 10000,
             mem: 10,
             tol_grad: 1e-8,
         }
@@ -40,12 +40,12 @@ struct QspProblem<'a, T: ComputeBackend> {
 }
 
 impl<'a, T: ComputeBackend> QspProblem<'a, T> {
-    fn cached(&self, p: &Array1<f64>) -> (f64, Array1<f64>) {
+    fn cached(&self, p: &Array1<f64>) -> Result<(f64, Array1<f64>)> {
         {
             let c = self.cache.borrow();
             if let Some((cp, cost, grad)) = c.as_ref() {
                 if cp == p {
-                    return (*cost, grad.clone());
+                    return Ok((*cost, grad.clone()));
                 }
             }
         }
@@ -57,18 +57,11 @@ impl<'a, T: ComputeBackend> QspProblem<'a, T> {
 
         let (cost, mut grad) = self.backend.evaluate_f_grad(&p_mapped.view());
 
-        // in case we applied a map that changed our param size,
-        // reduce it. If different maps are used at a later point we might
-        // need to abstract this away into the map type.
-        if grad.len() > p.len() {
-            let mut new_grad = Array1::from_iter(grad.iter().take(p.len()).map(|p| *p));
-            for i in 0..(grad.len() / 2 as usize) {
-                new_grad[i] += grad[grad.len() - (i + 1)];
-            }
-            grad = new_grad;
-        }
+        // reduce full-phase grad to the phases actually optimized
+        self.map.fold(&mut grad, self.backend.get_target())?;
         *self.cache.borrow_mut() = Some((p_mapped, cost, grad.clone()));
-        (cost, grad)
+
+        Ok((cost, grad))
     }
 }
 
@@ -79,7 +72,7 @@ impl<'a, T: ComputeBackend> CostFunction for QspProblem<'a, T> {
         if self.cancel.is_cancelled() {
             return Err(anyhow::anyhow!("cancelled").into());
         }
-        Ok(self.cached(p).0)
+        Ok(self.cached(p)?.0)
     }
 }
 
@@ -87,7 +80,7 @@ impl<'a, T: ComputeBackend> Gradient for QspProblem<'a, T> {
     type Param = Array1<f64>;
     type Gradient = Array1<f64>;
     fn gradient(&self, p: &Self::Param) -> Result<Self::Gradient, Error> {
-        Ok(self.cached(p).1)
+        Ok(self.cached(p)?.1)
     }
 }
 

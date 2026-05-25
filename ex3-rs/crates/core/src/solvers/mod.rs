@@ -10,7 +10,7 @@ use crate::{
     utils::parse_usize_gt_0,
 };
 use anyhow::Result;
-use ndarray::{Array1, Axis};
+use ndarray::{Array, Array1, ArrayBase, Axis};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -110,11 +110,48 @@ impl FromStr for PhaseMap {
     }
 }
 
+use ndarray::{Data, Dimension, IntoDimension};
+use std::ops::AddAssign;
+
+fn fold<A, S, D>(a: &ArrayBase<S, D>) -> Array<A, D>
+where
+    A: Clone + Default + AddAssign,
+    S: Data<Elem = A>,
+    D: Dimension,
+{
+    let n = a.raw_dim();
+
+    let mut half = n.clone();
+    for (h, &len) in half.slice_mut().iter_mut().zip(n.slice()) {
+        *h = (len + 1) / 2;
+    }
+    let mut out = Array::<A, D>::from_elem(half, A::default());
+
+    for (idx, val) in a.indexed_iter() {
+        let mut o = idx.into_dimension();
+        for (c, &len) in o.slice_mut().iter_mut().zip(n.slice()) {
+            *c = (*c).min(len - 1 - *c);
+        }
+        out[o] += val.clone();
+    }
+    out
+}
+
 impl PhaseMap {
-    pub fn apply(&self, phase_in: &mut Array1<f64>, t: &TargetPoly) -> Result<()> {
+    fn does_mirror(&self, t: &TargetPoly) -> Result<bool> {
         match (self, t.all_real()) {
-            (PhaseMap::None, _) | (PhaseMap::MirrorIfPossible, false) => Ok(()),
-            (PhaseMap::Mirror, true) | (PhaseMap::MirrorIfPossible, true) => {
+            (PhaseMap::None, _) | (PhaseMap::MirrorIfPossible, false) => Ok(false),
+            (PhaseMap::Mirror, true) | (PhaseMap::MirrorIfPossible, true) => Ok(true),
+            (PhaseMap::Mirror, false) => {
+                anyhow::bail!(format!("Cannot do mirror if target isn't real!"))
+            }
+        }
+    }
+
+    pub fn apply(&self, phase_in: &mut Array1<f64>, t: &TargetPoly) -> Result<()> {
+        match self.does_mirror(t)? {
+            false => Ok(()),
+            true => {
                 // idk if there is a nice way to do without double copy
                 let n = phase_in.len();
                 let copy = Array1::from_iter(
@@ -132,8 +169,15 @@ impl PhaseMap {
                 phase_in[0] += PI / 4.;
                 Ok(())
             }
-            (PhaseMap::Mirror, false) => {
-                anyhow::bail!(format!("Cannot do mirror if target isn't real!"))
+        }
+    }
+
+    pub fn fold<D: Dimension>(&self, a: &mut Array<f64, D>, t: &TargetPoly) -> Result<()> {
+        match self.does_mirror(t)? {
+            false => Ok(()),
+            true => {
+                *a = fold(a);
+                Ok(())
             }
         }
     }

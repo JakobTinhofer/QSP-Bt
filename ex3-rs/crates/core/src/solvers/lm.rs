@@ -33,9 +33,9 @@ impl<'a, T: ComputeBackend> QspLmProblem<'a, T> {
         cancel: CancelToken,
         observer: Arc<dyn ProgressObserver>,
         stage: StageInfo,
-    ) -> Self {
-        let (r, j) = Self::get_jac_res(backend, &init_xs, map);
-        Self {
+    ) -> anyhow::Result<Self> {
+        let (r, j) = Self::get_jac_res(backend, &init_xs, map)?;
+        Ok(Self {
             backend,
             p: init_xs,
             r,
@@ -45,24 +45,27 @@ impl<'a, T: ComputeBackend> QspLmProblem<'a, T> {
             observer,
             stage,
             eval_count: Cell::new(0),
-        }
+        })
     }
 
     fn get_jac_res(
         backend: &'a T,
         p: &DVector<f64>,
         map: PhaseMap,
-    ) -> (DVector<f64>, DMatrix<f64>) {
+    ) -> anyhow::Result<(DVector<f64>, DMatrix<f64>)> {
         let mut v = ArrayView1::from(p.as_slice()).into_owned();
-        map.apply(&mut v, backend.get_target())
-            .map_err(|e| format!("Failed to apply map! Err: {e}"))
-            .unwrap();
-        let (r, jac) = backend.evaluate_res_jac(&v.view());
+        let t = backend.get_target();
+        map.apply(&mut v, t)?;
+        let (mut r, mut jac) = backend.evaluate_res_jac(&v.view());
+
+        map.fold(&mut r, t)?;
+        map.fold(&mut jac, t)?;
+
         let (r_vec, _) = r.into_raw_vec_and_offset();
         let (rows, cols) = jac.dim();
         let transposed = jac.t().as_standard_layout().into_owned();
         let (vec, _) = transposed.into_raw_vec_and_offset();
-        (DVector::from_vec(r_vec), DMatrix::from_vec(rows, cols, vec))
+        Ok((DVector::from_vec(r_vec), DMatrix::from_vec(rows, cols, vec)))
     }
 }
 impl<'a, T: ComputeBackend> LeastSquaresProblem<f64, Dyn, Dyn> for QspLmProblem<'a, T> {
@@ -72,7 +75,8 @@ impl<'a, T: ComputeBackend> LeastSquaresProblem<f64, Dyn, Dyn> for QspLmProblem<
 
     fn set_params(&mut self, x: &nalgebra::Vector<f64, Dyn, Self::ParameterStorage>) {
         self.p.copy_from(x);
-        (self.r, self.j) = Self::get_jac_res(self.backend, &self.p, self.map);
+        (self.r, self.j) =
+            Self::get_jac_res(self.backend, &self.p, self.map).expect("Failed to get jac,res!");
     }
 
     fn params(&self) -> nalgebra::Vector<f64, Dyn, Self::ParameterStorage> {
@@ -137,7 +141,7 @@ impl<T: ComputeBackend> Solver<T> for LmOptions {
             ctx.cancel.clone(),
             ctx.observer.clone(),
             stage,
-        );
+        )?;
         let (_res, _rep) = LevenbergMarquardt::new().minimize(problem);
 
         if ctx.cancel.is_cancelled() {

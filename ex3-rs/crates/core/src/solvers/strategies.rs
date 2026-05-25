@@ -161,7 +161,7 @@ pub fn solve_hotstart_seeded<T: ComputeBackend, S: Solver<T> + ?Sized>(
     )?;
 
     let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
-    let pertub: Array1<f64> = (0..main_degree - hotstart_degree)
+    let pertub: Array1<f64> = (0..(main_degree - hotstart_degree))
         .map(|_| rng.random_range(0.0..2.0 * PI))
         .collect();
     let padded = concatenate![Axis(0), phases, pertub];
