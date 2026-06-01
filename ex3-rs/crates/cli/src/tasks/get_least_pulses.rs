@@ -39,6 +39,7 @@ impl TaskTrait for GetLeastPulsesTask {
                     &t.target_pattern,
                     Parity::from(t.parity),
                     self.target_len,
+                    t.distribution.into(),
                 )?,
                 b,
             ),

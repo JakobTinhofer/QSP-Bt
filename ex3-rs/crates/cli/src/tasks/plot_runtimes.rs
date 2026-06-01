@@ -57,7 +57,12 @@ impl TaskTrait for PlotRuntimesTask {
                     _ => (),
                 }
             }
-            let target = TargetPoly::from_pattern(&t.target_pattern, p, current_target_len)?;
+            let target = TargetPoly::from_pattern(
+                &t.target_pattern,
+                p,
+                current_target_len,
+                t.distribution.into(),
+            )?;
             eprintln!(
                 "Target length: 2 * {}, Degree: {}",
                 target.xs.len() / 2 as usize,

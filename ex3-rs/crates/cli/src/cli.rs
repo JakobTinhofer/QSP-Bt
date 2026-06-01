@@ -11,7 +11,7 @@ use qsp_rs_core::{
         configuration::{PhaseGenerator, PhaseMap, SolveMode},
         lm::LmOptions,
     },
-    target::{Parity, TargetPattern},
+    target::{Parity, TargetDistribution, TargetPattern},
 };
 use serde::{Deserialize, Serialize};
 
@@ -176,6 +176,23 @@ impl From<ParityArg> for Parity {
     }
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Serialize, Deserialize, Debug)]
+pub enum TargetDistributionArg {
+    /// This corresponds to a physical JC system
+    Sqrt,
+    /// This corresponds to the 2nd order pertubation system outlined in ref[1]
+    Equidistant,
+}
+
+impl From<TargetDistributionArg> for TargetDistribution {
+    fn from(value: TargetDistributionArg) -> Self {
+        match value {
+            TargetDistributionArg::Equidistant => Self::Equidistant,
+            TargetDistributionArg::Sqrt => Self::Sqrt,
+        }
+    }
+}
+
 #[derive(ClapArgs, Debug, Clone, Serialize, Deserialize)]
 #[command(next_help_heading = "Target configuration")]
 pub struct TargetConfig {
@@ -189,6 +206,10 @@ pub struct TargetConfig {
     /// parity ("even" or "odd")
     #[arg(short = 'p', long, value_enum, default_value_t = ParityArg::Even)]
     pub parity: ParityArg,
+
+    /// How to space the target points
+    #[arg(long, value_enum, default_value_t = TargetDistributionArg::Sqrt)]
+    pub distribution: TargetDistributionArg,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Serialize, Deserialize, Debug)]

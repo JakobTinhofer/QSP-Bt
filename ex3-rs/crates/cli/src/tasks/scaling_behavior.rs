@@ -62,7 +62,12 @@ impl TaskTrait for ScalingBehaviorTask {
                     d
                 };
 
-                let target = TargetPoly::from_pattern(&t.target_pattern, p, current_target_length)?;
+                let target = TargetPoly::from_pattern(
+                    &t.target_pattern,
+                    p,
+                    current_target_length,
+                    t.distribution.into(),
+                )?;
                 let backend = Backend::match_regularization(
                     CpuComputeBackend::new(target, b),
                     s.strategy.regularization_lambda,

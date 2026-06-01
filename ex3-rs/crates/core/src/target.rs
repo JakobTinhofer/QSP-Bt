@@ -10,15 +10,6 @@ use std::{
 
 use crate::utils::parse_usize_gt_0;
 
-#[derive(Debug)]
-pub struct TargetPoly {
-    pub xs: Array1<f64>,
-    pub ys: Array1<Complex64>,
-    pub thetas: Array1<f64>,
-    pattern: Option<TargetPattern>,
-    parity: Option<Parity>,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TargetPattern {
     RandomPeaks,
@@ -108,6 +99,16 @@ impl TargetPattern {
     }
 }
 
+#[derive(Debug)]
+pub struct TargetPoly {
+    pub xs: Array1<f64>,
+    pub ys: Array1<Complex64>,
+    pub thetas: Array1<f64>,
+    pattern: Option<TargetPattern>,
+    parity: Option<Parity>,
+    pub distribution: Option<TargetDistribution>,
+}
+
 impl TargetPoly {
     pub fn get_parity(&self) -> Option<Parity> {
         self.parity
@@ -140,10 +141,15 @@ impl TargetPoly {
             thetas,
             pattern: None,
             parity: None,
+            distribution: None,
         }
     }
 
-    pub fn new_forced_parity(target_y_half: Array1<Complex64>, parity: Parity) -> Result<Self> {
+    pub fn new_forced_parity(
+        target_y_half: Array1<Complex64>,
+        parity: Parity,
+        dist: TargetDistribution,
+    ) -> Result<Self> {
         let n_half = target_y_half.len();
         let mut s = Self {
             xs: Array1::zeros(2 * n_half),
@@ -151,13 +157,14 @@ impl TargetPoly {
             thetas: Array1::zeros(2 * n_half),
             pattern: None,
             parity: Some(parity),
+            distribution: Some(dist),
         };
         let parity_sign = match parity {
             Parity::Even => 1.,
             Parity::Odd => -1.,
         };
         for i in 0..n_half {
-            let t = theta_k(i + 1, n_half)?;
+            let t = dist.theta_k(i + 1, n_half)?;
             s.thetas[n_half + i] = t;
             s.thetas[n_half - i - 1] = PI - t;
             s.xs[n_half + i] = t.cos();
@@ -168,10 +175,62 @@ impl TargetPoly {
         Ok(s)
     }
 
-    pub fn from_pattern(bp: &TargetPattern, p: Parity, n: usize) -> Result<Self> {
-        let mut t = Self::new_forced_parity(bp.get_yhalf(n), p)?;
+    pub fn from_pattern(
+        bp: &TargetPattern,
+        p: Parity,
+        n: usize,
+        d: TargetDistribution,
+    ) -> Result<Self> {
+        let mut t = Self::new_forced_parity(bp.get_yhalf(n), p, d)?;
         t.pattern = Some(bp.clone());
         Ok(t)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TargetDistribution {
+    Sqrt,
+    Equidistant,
+}
+
+impl TargetDistribution {
+    pub fn theta_k(&self, k: usize, n_half: usize) -> anyhow::Result<f64> {
+        anyhow::ensure!(k > 0 && k <= n_half, "Range for k: 1..N_HALF");
+        match self {
+            TargetDistribution::Sqrt => {
+                Ok((TargetDistribution::Equidistant.theta_k(k, n_half)? * (PI / 2.)).sqrt())
+            }
+            TargetDistribution::Equidistant => Ok(((k as f64) / ((n_half + 1) as f64)) * (PI / 2.)),
+        }
+    }
+
+    pub fn theta_k_continuous(&self, k: f64, n_half: usize) -> anyhow::Result<f64> {
+        anyhow::ensure!(
+            k <= n_half as f64,
+            "Range for k (continuous): |k| <= N_HALF"
+        );
+        match self {
+            TargetDistribution::Sqrt => Ok((TargetDistribution::Equidistant
+                .theta_k_continuous(k, n_half)?
+                * (PI / 2.))
+                .abs()
+                .sqrt()
+                * (if k >= 0. { 1. } else { -1. })),
+            TargetDistribution::Equidistant => Ok(k / ((n_half + 1) as f64) * (PI / 2.)),
+        }
+    }
+}
+
+impl FromStr for TargetDistribution {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+        let trimmed = s.trim().to_lowercase();
+        match trimmed.as_str() {
+            "sqrt" | "jc" | "s" | "root" => Ok(Self::Sqrt),
+            "equidistant" | "e" | "perturbed" => Ok(Self::Equidistant),
+            _ => anyhow::bail!("Could not match string!"),
+        }
     }
 }
 

@@ -13,7 +13,9 @@ use qsp_rs_core::compute::regularized::RidgeRegularizedBackend;
 use qsp_rs_core::compute::{Backend, ComputeBackend};
 use qsp_rs_core::solvers::configuration::{PhaseGenerator, PhaseMap, SolveMode};
 use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
-use qsp_rs_core::target::{theta_k as theta_k_core, theta_k_continuous as theta_k_cont_core};
+use qsp_rs_core::target::{
+    TargetDistribution, theta_k as theta_k_core, theta_k_continuous as theta_k_cont_core,
+};
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
     solvers::{SolveOutcome, Solver, TerminationReason, bfgs::BfgsOptions, lm::LmOptions},
@@ -238,6 +240,7 @@ fn __solve(
     ys,
     *,
     parity           = "even",
+    target_dist      = "sqrt",
     solver           = "bfgs",
     mode             = "hotstart,20,60",
     phase_map        = "mirror-if-possible",
@@ -254,6 +257,7 @@ fn solve_poly(
     py: Python<'_>,
     ys: &Bound<'_, PyAny>,
     parity: &str,
+    target_dist: &str,
     solver: &str,
     mode: &str,
     phase_map: &str,
@@ -274,7 +278,11 @@ fn solve_poly(
 
     let parity: Parity = parity.parse()?;
     let ys_array = ys.as_array().to_owned();
-    let target = TargetPoly::new_forced_parity(ys_array, parity)?;
+    let target = TargetPoly::new_forced_parity(
+        ys_array,
+        parity,
+        TargetDistribution::from_str(target_dist)?,
+    )?;
 
     __solve(
         py,
@@ -311,6 +319,7 @@ fn theta_k_continuous(k: f64, n_half: usize) -> PyResult<f64> {
     target_pattern,
     *,
     parity           = "even",
+    target_dist      = "sqrt",
     solver           = "bfgs",
     mode             = "hotstart,20,60",
     phase_map        = "mirror-if-possible",
@@ -328,6 +337,7 @@ fn solve_poly_with_pattern(
     target_half_len: usize,
     target_pattern: &str,
     parity: &str,
+    target_dist: &str,
     solver: &str,
     mode: &str,
     phase_map: &str,
@@ -342,7 +352,12 @@ fn solve_poly_with_pattern(
 ) -> PyResult<PySolveResult> {
     let pattern: TargetPattern = target_pattern.parse()?;
     let parity: Parity = parity.parse()?;
-    let target = TargetPoly::from_pattern(&pattern, parity, target_half_len)?;
+    let target = TargetPoly::from_pattern(
+        &pattern,
+        parity,
+        target_half_len,
+        TargetDistribution::from_str(target_dist)?,
+    )?;
 
     __solve(
         py,
