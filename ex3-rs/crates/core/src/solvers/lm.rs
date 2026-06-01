@@ -155,6 +155,9 @@ impl<T: ComputeBackend> Solver<T> for LmOptions {
                 levenberg_marquardt::TerminationReason::Converged { ftol: _, xtol: _ } => {
                     super::TerminationReason::Converged
                 }
+                levenberg_marquardt::TerminationReason::User(str) => {
+                    return Err(SolveError::SolverError(str));
+                }
                 _ => super::TerminationReason::Other,
             },
         ))

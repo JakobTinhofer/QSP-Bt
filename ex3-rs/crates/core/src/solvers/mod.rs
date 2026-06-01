@@ -48,6 +48,8 @@ pub enum SolveError {
     Other(#[from] anyhow::Error),
     #[error("Error with ")]
     StrategyError(#[from] StrategyError),
+    #[error("internal solver error: ")]
+    SolverError(&'static str),
 }
 
 pub type SolveResult<T = SolveOutcome> = Result<T, SolveError>;
