@@ -48,6 +48,7 @@ struct PointScratch {
     right_side: Vec<C2x2>,
     m_pre: Vec<C2x2>,
     m00s: Array1<Complex64>,
+    g_loc: Array1<f64>,
 }
 
 impl PointScratch {
@@ -57,6 +58,7 @@ impl PointScratch {
             right_side: vec![C2x2::empty(); n],
             m_pre: vec![C2x2::empty(); n],
             m00s: Array1::<Complex64>::zeros(n),
+            g_loc: Array1::<f64>::zeros(n),
         }
     }
 }
@@ -75,7 +77,7 @@ impl CpuComputeBackend {
         alphas: &[Complex64],
         betas: &[Complex64],
         scratch: &mut PointScratch,
-    ) -> (Complex64, Array1<Complex64>) {
+    ) -> (Complex64, Array1<Complex64>, Array1<f64>) {
         let n = r_z.len();
         let d = n - 1;
         let s = (1.0 - x * x).max(0.0).sqrt();
@@ -86,6 +88,7 @@ impl CpuComputeBackend {
             right_side,
             m_pre,
             m00s,
+            g_loc,
         } = scratch;
 
         for k in 1..=d {
@@ -112,8 +115,10 @@ impl CpuComputeBackend {
 
         let u = left_side[d];
         let r = u.get(0, 0) - f;
+        let r_conj = r.conj();
 
         m00s[0] = half_i * u.get(0, 0);
+        g_loc[0] = 2.0 * (r_conj * m00s[0]).re;
 
         for k in 1..=d {
             let l00 = left_side[k - 1].get(0, 0);
@@ -130,9 +135,10 @@ impl CpuComputeBackend {
             let b_term = is_l00 + xl01;
 
             m00s[k] = alphas[k] * r00 * a_term + betas[k] * r10 * b_term;
+            g_loc[k] = 2.0 * (r_conj * m00s[k]).re;
         }
 
-        (r, m00s.clone())
+        (r, m00s.clone(), g_loc.clone())
     }
 
     fn evaluate_both_st(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -185,7 +191,7 @@ impl ComputeBackend for CpuComputeBackend {
         let n = phases.len();
         let n_points = self.target.xs.len();
 
-        let results: Vec<(Complex64, Array1<Complex64>)> = xs
+        let results: Vec<(Complex64, Array1<Complex64>, Array1<f64>)> = xs
             .par_iter()
             .zip(ys.par_iter())
             .map_init(
@@ -197,7 +203,7 @@ impl ComputeBackend for CpuComputeBackend {
         let mut residuals = Array1::<f64>::zeros(2 * n_points);
         let mut jacobian = Array2::<f64>::zeros((2 * n_points, n));
 
-        for (p, (r, m00s)) in results.into_iter().enumerate() {
+        for (p, (r, m00s, _)) in results.into_iter().enumerate() {
             residuals[2 * p] = r.re;
             residuals[2 * p + 1] = r.im;
             for k in 0..n {
@@ -233,67 +239,10 @@ impl ComputeBackend for CpuComputeBackend {
             .par_iter()
             .zip(ys.par_iter())
             .map_init(
-                || {
-                    (
-                        vec![C2x2::empty(); n],  // left_side
-                        vec![C2x2::empty(); n],  // right_side
-                        vec![C2x2::empty(); n],  // m_pre (index 0 unused)
-                        Array1::<f64>::zeros(n), // g_local
-                    )
-                },
-                |(left_side, right_side, m_pre, g_local), (x, f)| {
-                    let x = *x;
-                    let s = (1.0 - x * x).max(0.0).sqrt();
-
-                    for k in 1..=d {
-                        let a = r_z[k].get(0, 0);
-                        let b = r_z[k].get(1, 1);
-                        m_pre[k] = C2x2::new([
-                            [
-                                Complex64::new(x * a.re, x * a.im),
-                                Complex64::new(-s * b.im, s * b.re),
-                            ],
-                            [
-                                Complex64::new(-s * a.im, s * a.re),
-                                Complex64::new(x * b.re, x * b.im),
-                            ],
-                        ]);
-                    }
-
-                    left_side[0] = r_z[0];
-                    right_side[d] = C2x2::eye();
-                    for k in 1..=d {
-                        left_side[k] = left_side[k - 1] * m_pre[k];
-                        right_side[d - k] = m_pre[d - k + 1] * right_side[d - k + 1];
-                    }
-
-                    let u = left_side[d];
-                    let r = u.get(0, 0) - f;
-                    let loss_term = r.norm_sqr();
-                    let r_conj = r.conj();
-
-                    let m00_0 = half_i * u.get(0, 0);
-                    g_local[0] = 2.0 * (r_conj * m00_0).re;
-
-                    for k in 1..=n - 1 {
-                        let l00 = left_side[k - 1].get(0, 0);
-                        let l01 = left_side[k - 1].get(0, 1);
-                        let r00 = right_side[k].get(0, 0);
-                        let r10 = right_side[k].get(1, 0);
-
-                        let xl00 = Complex64::new(x * l00.re, x * l00.im);
-                        let xl01 = Complex64::new(x * l01.re, x * l01.im);
-                        let is_l00 = Complex64::new(-s * l00.im, s * l00.re);
-                        let is_l01 = Complex64::new(-s * l01.im, s * l01.re);
-
-                        let a_term = xl00 + is_l01;
-                        let b_term = is_l00 + xl01;
-
-                        let m00 = alphas[k] * r00 * a_term + betas[k] * r10 * b_term;
-                        g_local[k] = 2.0 * (r_conj * m00).re;
-                    }
-
-                    (loss_term, g_local.clone())
+                || PointScratch::new(n),
+                |scratch, (x, f)| {
+                    let r = self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch);
+                    (r.0.norm_sqr(), r.2)
                 },
             )
             .reduce(
