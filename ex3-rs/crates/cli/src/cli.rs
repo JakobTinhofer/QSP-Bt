@@ -6,7 +6,12 @@ use ndarray::Array1;
 use num_complex::Complex64;
 use qsp_rs_core::{
     compute::{ComputeBackend, cpu::BackendMode},
-    solvers::{PhaseMap, SolveMode, Solver, bfgs::BfgsOptions, lm::LmOptions},
+    solvers::{
+        Solver,
+        bfgs::BfgsOptions,
+        configuration::{PhaseGenerator, PhaseMap, SolveMode},
+        lm::LmOptions,
+    },
     target::{Parity, TargetPattern},
 };
 use serde::{Deserialize, Serialize};
@@ -43,7 +48,7 @@ pub struct SolverStrategy {
     ///             "hotstart,S,D" — solve at degree S, then continue at degree D
     ///             "cascade,N,D" — N cascading steps up to degree D
     /// if running PlotRuntimes task, this will be interpreted as a ratio and scaled accordingly
-    #[arg(short = 'M', long, value_parser = SolveMode::parse, default_value = "hotstart,20,60")]
+    #[arg(short = 'M', long, value_parser = SolveMode::from_str, default_value = "hotstart,20,60")]
     #[serde(flatten)]
     pub mode: SolveMode,
 
@@ -59,8 +64,8 @@ pub struct SolverStrategy {
     /// The max. magnitude of the first guess for the random phases
     /// to initialize the solver. Choose 0 for mirrored phases to get faster
     /// convergance and lower total phase values.
-    #[arg(short = 'i', long, default_value = ".4")]
-    pub init_perturb_mag: f64,
+    #[arg(short = 'i', long, value_parser = PhaseGenerator::from_str, default_value = "0")]
+    pub phase_init: PhaseGenerator,
 }
 
 /// What gets serialized to the file: only the relevant solver's params.

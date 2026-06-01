@@ -1,4 +1,5 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -9,14 +10,12 @@ use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict};
 
 use qsp_rs_core::compute::ComputeBackend;
+use qsp_rs_core::solvers::configuration::{PhaseGenerator, PhaseMap, SolveMode};
 use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
 use qsp_rs_core::target::{theta_k as theta_k_core, theta_k_continuous as theta_k_cont_core};
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
-    solvers::{
-        PhaseMap, SolveMode, SolveOutcome, Solver, TerminationReason, bfgs::BfgsOptions,
-        lm::LmOptions,
-    },
+    solvers::{SolveOutcome, Solver, TerminationReason, bfgs::BfgsOptions, lm::LmOptions},
     target::{Parity, TargetPattern, TargetPoly},
 };
 
@@ -135,13 +134,33 @@ fn build_lm(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<LmOptions> {
     Ok(o)
 }
 
+fn phase_gen_from_pyobj(obj: &Bound<'_, PyAny>) -> PyResult<PhaseGenerator> {
+    // 1) string
+    if let Ok(s) = obj.extract::<String>() {
+        return s
+            .parse::<PhaseGenerator>()
+            .map_err(|e| PyTypeError::new_err(format!("invalid PhaseGenerator string: {e}")));
+    }
+    // 2) real numpy float64 array
+    if let Ok(arr) = obj.extract::<PyReadonlyArray1<f64>>() {
+        return Ok(PhaseGenerator::Fixed(arr.as_array().to_owned()));
+    }
+    // 3) plain Python list/tuple of numbers -> Fixed
+    if let Ok(v) = obj.extract::<Vec<f64>>() {
+        return Ok(PhaseGenerator::Fixed(Array1::from_vec(v)));
+    }
+    Err(PyTypeError::new_err(
+        "expected a str, a 1-D float64 numpy array, or a sequence of floats",
+    ))
+}
+
 fn __solve(
     py: Python<'_>,
     target: TargetPoly,
     solver: &str,
     mode: &str,
     phase_map: &str,
-    init_perturb_mag: f64,
+    phase_init: PhaseGenerator,
     backend_mode: &str,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
@@ -151,7 +170,7 @@ fn __solve(
 ) -> PyResult<PySolveResult> {
     let phase_map_p: PhaseMap = phase_map.parse()?;
     let backend_md: BackendMode = backend_mode.parse()?;
-    let solve_mode = SolveMode::parse(mode)?;
+    let solve_mode = SolveMode::from_str(mode)?;
 
     let pytarget = PyTargetPoly {
         xs: target.xs.clone(),
@@ -178,15 +197,8 @@ fn __solve(
     // Release GIL while code is running
     let outcome: anyhow::Result<SolveOutcome> = py.allow_threads(|| {
         catch_unwind(AssertUnwindSafe(|| match seed {
-            Some(s) => solver_box.solve_seeded(
-                &backend,
-                &ctx,
-                solve_mode,
-                phase_map_p,
-                s,
-                init_perturb_mag,
-            ),
-            None => solver_box.solve(&backend, &ctx, solve_mode, phase_map_p, init_perturb_mag),
+            Some(_) => solver_box.solve(&backend, &ctx, solve_mode, phase_map_p, phase_init),
+            None => solver_box.solve(&backend, &ctx, solve_mode, phase_map_p, phase_init),
         }))
         .map(|res| res.map_err(|e| e.into()))
         .unwrap_or_else(|panic_payload| {
@@ -221,7 +233,7 @@ fn __solve(
     solver           = "bfgs",
     mode             = "hotstart,20,60",
     phase_map        = "mirror-if-possible",
-    init_perturb_mag = 0.4,
+    init             = PhaseGenerator::Random { magnitude: 0.4, seed: None },
     backend_mode     = "auto",
     seed             = None,
     bfgs_options     = None,
@@ -236,7 +248,7 @@ fn solve_poly(
     solver: &str,
     mode: &str,
     phase_map: &str,
-    init_perturb_mag: f64,
+    #[pyo3(from_py_with = "phase_gen_from_pyobj")] init: PhaseGenerator,
     backend_mode: &str,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
@@ -260,7 +272,7 @@ fn solve_poly(
         solver,
         mode,
         phase_map,
-        init_perturb_mag,
+        init,
         backend_mode,
         seed,
         bfgs_options,
@@ -291,7 +303,7 @@ fn theta_k_continuous(k: f64, n_half: usize) -> PyResult<f64> {
     solver           = "bfgs",
     mode             = "hotstart,20,60",
     phase_map        = "mirror-if-possible",
-    init_perturb_mag = 0.4,
+    init             = PhaseGenerator::Random { magnitude: 0.4, seed: None },
     backend_mode     = "auto",
     seed             = None,
     bfgs_options     = None,
@@ -307,7 +319,7 @@ fn solve_poly_with_pattern(
     solver: &str,
     mode: &str,
     phase_map: &str,
-    init_perturb_mag: f64,
+    #[pyo3(from_py_with = "phase_gen_from_pyobj")] init: PhaseGenerator,
     backend_mode: &str,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
@@ -325,7 +337,7 @@ fn solve_poly_with_pattern(
         solver,
         mode,
         phase_map,
-        init_perturb_mag,
+        init,
         backend_mode,
         seed,
         bfgs_options,

@@ -2,7 +2,7 @@ use crate::cli::{BLUE, GREEN, PhaseMapArg, RESET, YELLOW};
 use clap::Args;
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
-    solvers::{PhaseMap, observe::SolverContext},
+    solvers::{configuration::PhaseMap, observe::SolverContext},
     target::{Parity, TargetPoly},
 };
 use serde::{Deserialize, Serialize};
@@ -73,7 +73,7 @@ impl TaskTrait for ScalingBehaviorTask {
                         &SolverContext::default(),
                         mode,
                         PhaseMap::from(s.strategy.phase_map),
-                        s.strategy.init_perturb_mag,
+                        s.strategy.phase_init.clone(),
                     )?;
                     avg_cost += res.cost / self.avg_n as f64;
                     let elapsed = now.elapsed();
@@ -81,7 +81,7 @@ impl TaskTrait for ScalingBehaviorTask {
                     avg_iter += res.iterations as f64 / self.avg_n as f64;
                     avg_tot_phase += res.phase_mag_sum / self.avg_n as f64;
                     nr_of_phases = res.phases.len();
-                    //eprintln!("[{RED}*{RESET}] CONFIG: {mode:?} {t:?}");
+
                     let digits = (self.avg_n / 10) as usize + 1;
                     eprintln!(
                         "[{BLUE}i{RESET}] ({:>digits$}/{:>digits$}) n={current_target_length} d={d}: cost={:e} tot_phase:{} iter={} rt={elapsed:?}",

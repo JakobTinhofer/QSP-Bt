@@ -5,8 +5,9 @@ use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
 use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
+use qsp_rs_core::solvers::SolveOutcome;
+use qsp_rs_core::solvers::configuration::PhaseMap;
 use qsp_rs_core::solvers::observe::SolverContext;
-use qsp_rs_core::solvers::{PhaseMap, SolveOutcome};
 use qsp_rs_core::target::{Parity, TargetPoly};
 use serde::{Deserialize, Serialize};
 
@@ -78,7 +79,7 @@ impl TaskTrait for PlotRuntimesTask {
                 &SolverContext::default(),
                 mode,
                 PhaseMap::from(s.strategy.phase_map),
-                s.strategy.init_perturb_mag,
+                s.strategy.phase_init.clone(),
             )?;
 
             let elapsed = start.elapsed();

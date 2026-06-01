@@ -3,7 +3,7 @@ use anyhow::Result;
 use clap::Args;
 use qsp_rs_core::{
     compute::cpu::CpuComputeBackend,
-    solvers::{SolveOutcome, observe::SolverContext},
+    solvers::{SolveOutcome, configuration::PhaseMap, observe::SolverContext},
     target::{Parity, TargetPoly},
 };
 use serde::{Deserialize, Serialize};
@@ -51,8 +51,8 @@ impl TaskTrait for GetLeastPulsesTask {
                     &backend,
                     &SolverContext::default(),
                     s.strategy.mode.rescale(current_d),
-                    qsp_rs_core::solvers::PhaseMap::from(s.strategy.phase_map),
-                    s.strategy.init_perturb_mag,
+                    PhaseMap::from(s.strategy.phase_map),
+                    s.strategy.phase_init.clone(),
                 )
                 .expect("Solver failed!");
             println!("{current_d} {f_err}");

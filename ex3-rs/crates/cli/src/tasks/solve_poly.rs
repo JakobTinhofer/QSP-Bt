@@ -8,8 +8,9 @@ use clap::Args;
 use ndarray::Array1;
 use qsp_rs_core::compute::ComputeBackend;
 use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
+use qsp_rs_core::solvers::SolveOutcome;
+use qsp_rs_core::solvers::configuration::PhaseMap;
 use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
-use qsp_rs_core::solvers::{PhaseMap, SolveOutcome};
 use qsp_rs_core::target::{Parity, TargetPoly};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -74,7 +75,7 @@ impl TaskTrait for SolvePolyTask {
             &ctx,
             cfg.solver.strategy.mode,
             PhaseMap::from(cfg.solver.strategy.phase_map),
-            cfg.solver.strategy.init_perturb_mag,
+            cfg.solver.strategy.phase_init.clone(),
         )?;
 
         let elapsed = start.elapsed();
