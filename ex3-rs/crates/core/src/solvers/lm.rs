@@ -56,10 +56,9 @@ impl<'a, T: ComputeBackend> QspLmProblem<'a, T> {
         let mut v = ArrayView1::from(p.as_slice()).into_owned();
         let t = backend.get_target();
         map.apply(&mut v, t)?;
-        let (mut r, mut jac) = backend.evaluate_res_jac(&v.view());
+        let (r, mut jac) = backend.evaluate_res_jac(&v.view());
 
-        map.fold(&mut r, t)?;
-        map.fold(&mut jac, t)?;
+        map.fold_jacobian(&mut jac, t)?;
 
         let (r_vec, _) = r.into_raw_vec_and_offset();
         let (rows, cols) = jac.dim();

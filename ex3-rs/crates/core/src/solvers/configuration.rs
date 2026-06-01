@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ndarray::{Array, Array1, ArrayBase, Axis, concatenate};
+use ndarray::{Array, Array1, Array2, ArrayBase, Axis, concatenate};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 
@@ -140,6 +140,27 @@ where
     out
 }
 
+fn fold_axis<A, S, D>(a: &ArrayBase<S, D>, axis: Axis) -> Array<A, D>
+where
+    A: Clone + Default + AddAssign,
+    S: Data<Elem = A>,
+    D: Dimension,
+{
+    let n = a.raw_dim();
+    let ax = axis.index();
+    let len = n.slice()[ax];
+    let mut half = n.clone();
+    half.slice_mut()[ax] = (len + 1) / 2;
+    let mut out = Array::<A, D>::from_elem(half, A::default());
+    for (idx, val) in a.indexed_iter() {
+        let mut o = idx.into_dimension();
+        let c = o.slice()[ax];
+        o.slice_mut()[ax] = c.min(len - 1 - c);
+        out[o] += val.clone();
+    }
+    out
+}
+
 impl PhaseMap {
     fn does_mirror(&self, t: &TargetPoly) -> Result<bool> {
         match (self, t.all_real()) {
@@ -180,6 +201,16 @@ impl PhaseMap {
             false => Ok(()),
             true => {
                 *a = fold(a);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn fold_jacobian(&self, a: &mut Array2<f64>, t: &TargetPoly) -> Result<()> {
+        match self.does_mirror(t)? {
+            false => Ok(()),
+            true => {
+                *a = fold_axis(a, Axis(1));
                 Ok(())
             }
         }
