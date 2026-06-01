@@ -21,6 +21,15 @@ pub enum Backend {
     RidgeRegularized(RidgeRegularizedBackend<CpuComputeBackend>),
 }
 
+impl Backend {
+    pub fn match_regularization(b: CpuComputeBackend, l: Option<f64>) -> Self {
+        match l {
+            Some(lambda) => Self::RidgeRegularized(RidgeRegularizedBackend::new(b, lambda)),
+            None => Self::Plain(b),
+        }
+    }
+}
+
 impl ComputeBackend for Backend {
     fn evaluate_f(&self, p: &ArrayView1<f64>) -> f64 {
         match self {

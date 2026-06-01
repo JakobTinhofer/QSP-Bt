@@ -4,6 +4,7 @@ use crate::cli::{GREEN, RESET};
 use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
+use qsp_rs_core::compute::Backend;
 use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
 use qsp_rs_core::solvers::SolveOutcome;
 use qsp_rs_core::solvers::configuration::PhaseMap;
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Args, Serialize, Deserialize)]
 pub struct PlotRuntimesTask {
     /// Cutoff runtime in seconds
-    #[arg(short = 'r', long, default_value = "180")]
+    #[arg(short = 't', long, default_value = "180")]
     max_runtime: usize,
 
     /// How large to make the steps between different tries
@@ -63,7 +64,10 @@ impl TaskTrait for PlotRuntimesTask {
                 current_degree
             );
 
-            let backend = CpuComputeBackend::new(target, b);
+            let backend = Backend::match_regularization(
+                CpuComputeBackend::new(target, b),
+                s.strategy.regularization_lambda,
+            );
 
             let mode = s.strategy.mode.rescale(current_degree);
 
@@ -74,7 +78,7 @@ impl TaskTrait for PlotRuntimesTask {
                 iterations: _,
                 term_reason: _,
                 phase_mag_sum: _,
-            } = s.get_solver::<CpuComputeBackend>().solve(
+            } = s.get_solver::<Backend>().solve(
                 &backend,
                 &SolverContext::default(),
                 mode,

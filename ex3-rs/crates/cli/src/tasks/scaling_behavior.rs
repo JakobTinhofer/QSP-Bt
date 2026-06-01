@@ -1,7 +1,10 @@
 use crate::cli::{BLUE, GREEN, PhaseMapArg, RESET, YELLOW};
 use clap::Args;
 use qsp_rs_core::{
-    compute::cpu::{BackendMode, CpuComputeBackend},
+    compute::{
+        Backend,
+        cpu::{BackendMode, CpuComputeBackend},
+    },
     solvers::{configuration::PhaseMap, observe::SolverContext},
     target::{Parity, TargetPoly},
 };
@@ -60,7 +63,10 @@ impl TaskTrait for ScalingBehaviorTask {
                 };
 
                 let target = TargetPoly::from_pattern(&t.target_pattern, p, current_target_length)?;
-                let backend = CpuComputeBackend::new(target, b);
+                let backend = Backend::match_regularization(
+                    CpuComputeBackend::new(target, b),
+                    s.strategy.regularization_lambda,
+                );
                 let mode = s.strategy.mode.rescale(parity_adjusted_d);
                 let mut nr_of_phases = 0;
                 let (mut avg_cost, mut avg_rt, mut avg_iter, mut avg_tot_phase) =
@@ -68,7 +74,7 @@ impl TaskTrait for ScalingBehaviorTask {
 
                 for i in 0..self.avg_n {
                     let now = Instant::now();
-                    let res = s.get_solver::<CpuComputeBackend>().solve(
+                    let res = s.get_solver::<Backend>().solve(
                         &backend,
                         &SolverContext::default(),
                         mode,

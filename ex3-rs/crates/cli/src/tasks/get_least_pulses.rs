@@ -2,7 +2,7 @@ use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
 use qsp_rs_core::{
-    compute::cpu::CpuComputeBackend,
+    compute::{Backend, cpu::CpuComputeBackend},
     solvers::{SolveOutcome, configuration::PhaseMap, observe::SolverContext},
     target::{Parity, TargetPoly},
 };
@@ -33,9 +33,16 @@ impl TaskTrait for GetLeastPulsesTask {
         let b = qsp_rs_core::compute::cpu::BackendMode::from(cfg.backend_mode);
         let s = cfg.solver;
 
-        let backend = CpuComputeBackend::new(
-            TargetPoly::from_pattern(&t.target_pattern, Parity::from(t.parity), self.target_len)?,
-            b,
+        let backend = Backend::match_regularization(
+            CpuComputeBackend::new(
+                TargetPoly::from_pattern(
+                    &t.target_pattern,
+                    Parity::from(t.parity),
+                    self.target_len,
+                )?,
+                b,
+            ),
+            s.strategy.regularization_lambda,
         );
 
         for current_d in (1..(self.start_d + 1)).rev().step_by(self.reduce_step_d) {
@@ -46,7 +53,7 @@ impl TaskTrait for GetLeastPulsesTask {
                 term_reason: _,
                 phase_mag_sum: _,
             } = s
-                .get_solver::<CpuComputeBackend>()
+                .get_solver::<Backend>()
                 .solve(
                     &backend,
                     &SolverContext::default(),

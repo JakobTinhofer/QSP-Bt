@@ -9,7 +9,8 @@ use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict};
 
-use qsp_rs_core::compute::ComputeBackend;
+use qsp_rs_core::compute::regularized::RidgeRegularizedBackend;
+use qsp_rs_core::compute::{Backend, ComputeBackend};
 use qsp_rs_core::solvers::configuration::{PhaseGenerator, PhaseMap, SolveMode};
 use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
 use qsp_rs_core::target::{theta_k as theta_k_core, theta_k_continuous as theta_k_cont_core};
@@ -162,6 +163,7 @@ fn __solve(
     phase_map: &str,
     phase_init: PhaseGenerator,
     backend_mode: &str,
+    regularize: Option<f64>,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
     lm_options: Option<&Bound<'_, PyDict>>,
@@ -177,10 +179,16 @@ fn __solve(
         ys: target.ys.clone(),
         n_half: target.ys.len() / 2,
     };
-    let backend = CpuComputeBackend::new(target, backend_md);
 
-    let solver_box: Box<dyn Solver<CpuComputeBackend>> = match solver.to_ascii_lowercase().as_str()
-    {
+    let backend = match regularize {
+        Some(lambda) => Backend::RidgeRegularized(RidgeRegularizedBackend::new(
+            CpuComputeBackend::new(target, backend_md),
+            lambda,
+        )),
+        None => Backend::Plain(CpuComputeBackend::new(target, backend_md)),
+    };
+
+    let solver_box: Box<dyn Solver<Backend>> = match solver.to_ascii_lowercase().as_str() {
         "bfgs" => Box::new(build_bfgs(bfgs_options)?),
         "lm" => Box::new(build_lm(lm_options)?),
         other => return Err(PyValueError::new_err(format!("unknown solver: {other:?}"))),
@@ -235,6 +243,7 @@ fn __solve(
     phase_map        = "mirror-if-possible",
     init             = PhaseGenerator::Random { magnitude: 0.4, seed: None },
     backend_mode     = "auto",
+    regularize       = None,
     seed             = None,
     bfgs_options     = None,
     lm_options       = None,
@@ -250,6 +259,7 @@ fn solve_poly(
     phase_map: &str,
     #[pyo3(from_py_with = "phase_gen_from_pyobj")] init: PhaseGenerator,
     backend_mode: &str,
+    regularize: Option<f64>,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
     lm_options: Option<&Bound<'_, PyDict>>,
@@ -274,6 +284,7 @@ fn solve_poly(
         phase_map,
         init,
         backend_mode,
+        regularize,
         seed,
         bfgs_options,
         lm_options,
@@ -305,6 +316,7 @@ fn theta_k_continuous(k: f64, n_half: usize) -> PyResult<f64> {
     phase_map        = "mirror-if-possible",
     init             = PhaseGenerator::Random { magnitude: 0.4, seed: None },
     backend_mode     = "auto",
+    regularize       = None,
     seed             = None,
     bfgs_options     = None,
     lm_options       = None,
@@ -321,6 +333,7 @@ fn solve_poly_with_pattern(
     phase_map: &str,
     #[pyo3(from_py_with = "phase_gen_from_pyobj")] init: PhaseGenerator,
     backend_mode: &str,
+    regularize: Option<f64>,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
     lm_options: Option<&Bound<'_, PyDict>>,
@@ -339,6 +352,7 @@ fn solve_poly_with_pattern(
         phase_map,
         init,
         backend_mode,
+        regularize,
         seed,
         bfgs_options,
         lm_options,

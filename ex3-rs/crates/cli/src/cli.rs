@@ -3,7 +3,6 @@ use std::str::FromStr;
 use crate::tasks::TaskType;
 use clap::{Args as ClapArgs, Parser, ValueEnum};
 use ndarray::Array1;
-use num_complex::Complex64;
 use qsp_rs_core::{
     compute::{ComputeBackend, cpu::BackendMode},
     solvers::{
@@ -66,6 +65,11 @@ pub struct SolverStrategy {
     /// convergance and lower total phase values.
     #[arg(short = 'i', long, value_parser = PhaseGenerator::from_str, default_value = "0")]
     pub phase_init: PhaseGenerator,
+
+    /// If set, enables regularization (ridge/tikhonov) with the given weight.
+    /// Choose a magnitude similar to the error you want to achieve.
+    #[arg(short = 'r', long)]
+    pub regularization_lambda: Option<f64>,
 }
 
 /// What gets serialized to the file: only the relevant solver's params.
@@ -245,41 +249,6 @@ pub fn trim_zeros(value: f64, precision: usize) -> String {
         let trimmed = s.trim_end_matches('0').trim_end_matches('.');
         trimmed.to_string()
     } else {
-        s
-    }
-}
-
-pub fn format_complex_polar(z: &Complex64, precision: usize) -> String {
-    let r = z.norm();
-    let phi = z.arg();
-    let i = format!("{YELLOW}{BOLD}i{RESET}");
-
-    let eps = 10f64.powi(-(precision as i32));
-    let r_str = trim_zeros(r, precision);
-
-    if phi.abs() < eps {
-        // φ ≈ 0 → kein Exponentialteil
-        r_str
-    } else {
-        format!("{r_str} · exp({i}·{})", trim_zeros(phi, precision),)
-    }
-}
-
-/// Formatiert ein ganzes Array, mehrzeilig oder einzeilig je nach Länge
-pub fn format_array(arr: &Array1<Complex64>, precision: usize) -> String {
-    let formatted: Vec<String> = arr
-        .iter()
-        .map(|z| format_complex_polar(z, precision))
-        .collect();
-
-    if arr.len() <= 6 {
-        format!("[ {} ]", formatted.join(", "))
-    } else {
-        let mut s = String::from("[\n");
-        for (i, item) in formatted.iter().enumerate() {
-            s.push_str(&format!("  {DIM}{i:3}:{RESET} {item}\n"));
-        }
-        s.push(']');
         s
     }
 }

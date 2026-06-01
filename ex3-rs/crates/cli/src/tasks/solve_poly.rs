@@ -6,6 +6,7 @@ use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
 use ndarray::Array1;
+use qsp_rs_core::compute::Backend;
 use qsp_rs_core::compute::ComputeBackend;
 use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
 use qsp_rs_core::solvers::SolveOutcome;
@@ -33,22 +34,22 @@ pub struct SolvePolyTask {
 
 impl TaskTrait for SolvePolyTask {
     fn execute(&self, cfg: ProgramConfig) -> Result<()> {
-        let backend = CpuComputeBackend::new(
-            TargetPoly::from_pattern(
-                &cfg.target.target_pattern,
-                Parity::from(cfg.target.parity),
-                self.target_half_len,
-            )?,
-            BackendMode::from(cfg.backend_mode),
+        let backend = Backend::match_regularization(
+            CpuComputeBackend::new(
+                TargetPoly::from_pattern(
+                    &cfg.target.target_pattern,
+                    Parity::from(cfg.target.parity),
+                    self.target_half_len,
+                )?,
+                BackendMode::from(cfg.backend_mode),
+            ),
+            cfg.solver.strategy.regularization_lambda,
         );
 
         println!(
             "[{BLUE}i{RESET}] Running with config={:?} and multithreading={:?}. Target:",
             cfg.solver.strategy, cfg.backend_mode
         );
-
-        //println!("x:\n{}", format_array_real(&backend.get_target().xs, 3));
-        //println!("y:\n{}", format_array(&backend.get_target().ys, 3));
 
         let start = Instant::now();
         let cancel = CancelToken::new();
@@ -70,7 +71,7 @@ impl TaskTrait for SolvePolyTask {
         let observer = Arc::new(CliObserver::new());
         let ctx = SolverContext::new(cancel, observer.clone());
 
-        let outcome: SolveOutcome = cfg.solver.get_solver::<CpuComputeBackend>().solve(
+        let outcome: SolveOutcome = cfg.solver.get_solver::<Backend>().solve(
             &backend,
             &ctx,
             cfg.solver.strategy.mode,
