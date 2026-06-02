@@ -25,7 +25,7 @@ pub struct BfgsOptions {
 impl Default for BfgsOptions {
     fn default() -> Self {
         Self {
-            max_iters: 10000,
+            max_iters: 500_000,
             mem: 10,
             tol_grad: 1e-8,
         }
