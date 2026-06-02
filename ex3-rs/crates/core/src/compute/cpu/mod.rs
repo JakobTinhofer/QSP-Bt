@@ -11,7 +11,7 @@ use crate::{
         ComputeBackend,
         cpu::{
             c2x2::C2x2,
-            qsp::{qsp_poly, z_rotation},
+            qsp::{qsp_poly, x_rotation},
         },
     },
     target::TargetPoly,
@@ -73,15 +73,16 @@ impl CpuComputeBackend {
         &self,
         x: f64,
         f: Complex64,
-        r_z: &[C2x2],
-        alphas: &[Complex64],
-        betas: &[Complex64],
+        p_x: &[C2x2],
         scratch: &mut PointScratch,
     ) -> (Complex64, Array1<Complex64>, Array1<f64>) {
-        let n = r_z.len();
+        let n = p_x.len();
         let d = n - 1;
         let s = (1.0 - x * x).max(0.0).sqrt();
-        let half_i = Complex64::new(0.0, 0.5);
+
+        // signal e^{iθZ} = diag(x+is, x-is); these are the two diagonal entries
+        let xp = Complex64::new(x, s); // x + i·s
+        let xm = Complex64::new(x, -s); // x - i·s
 
         let PointScratch {
             left_side,
@@ -91,22 +92,15 @@ impl CpuComputeBackend {
             g_loc,
         } = scratch;
 
+        // m_pre[k] = V · P_k, with V = diag(xp, xm) and P_k the X-rotation.
+        // Read (0,0) and (0,1) of the phase: an X-rotation carries info off-diagonal.
         for k in 1..=d {
-            let a = r_z[k].get(0, 0);
-            let b = r_z[k].get(1, 1);
-            m_pre[k] = C2x2::new([
-                [
-                    Complex64::new(x * a.re, x * a.im),
-                    Complex64::new(-s * b.im, s * b.re),
-                ],
-                [
-                    Complex64::new(-s * a.im, s * a.re),
-                    Complex64::new(x * b.re, x * b.im),
-                ],
-            ]);
+            let p = p_x[k].get(0, 0); // cos(φ_k/2)
+            let q = p_x[k].get(0, 1); // i·sin(φ_k/2)
+            m_pre[k] = C2x2::new([[xp * p, xp * q], [xm * q, xm * p]]);
         }
 
-        left_side[0] = r_z[0];
+        left_side[0] = p_x[0];
         right_side[d] = C2x2::eye();
         for k in 1..=d {
             left_side[k] = left_side[k - 1] * m_pre[k];
@@ -117,7 +111,8 @@ impl CpuComputeBackend {
         let r = u.get(0, 0) - f;
         let r_conj = r.conj();
 
-        m00s[0] = half_i * u.get(0, 0);
+        // ∂U00/∂φ0 = (i/2)·(X U)00 = (i/2)·U10  (was U00 for a Z-phase)
+        m00s[0] = Complex64::I * u.get(1, 0);
         g_loc[0] = 2.0 * (r_conj * m00s[0]).re;
 
         for k in 1..=d {
@@ -125,16 +120,17 @@ impl CpuComputeBackend {
             let l01 = left_side[k - 1].get(0, 1);
             let r00 = right_side[k].get(0, 0);
             let r10 = right_side[k].get(1, 0);
+            let p = p_x[k].get(0, 0);
+            let q = p_x[k].get(0, 1);
 
-            let xl00 = Complex64::new(x * l00.re, x * l00.im);
-            let xl01 = Complex64::new(x * l01.re, x * l01.im);
-            let is_l00 = Complex64::new(-s * l00.im, s * l00.re);
-            let is_l01 = Complex64::new(-s * l01.im, s * l01.re);
+            // L-elements weighted by the signal's diagonal entries
+            let lt0 = xp * l00;
+            let lt1 = xm * l01;
 
-            let a_term = xl00 + is_l01;
-            let b_term = is_l00 + xl01;
+            let a_term = q * lt0 + p * lt1;
+            let b_term = p * lt0 + q * lt1;
 
-            m00s[k] = alphas[k] * r00 * a_term + betas[k] * r10 * b_term;
+            m00s[k] = Complex64::I * (r00 * a_term + r10 * b_term);
             g_loc[k] = 2.0 * (r_conj * m00s[k]).re;
         }
 
@@ -143,7 +139,7 @@ impl CpuComputeBackend {
 
     fn evaluate_both_st(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
         let d = phases.len() - 1;
-        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
+        let r_z: Vec<C2x2> = phases.iter().map(|p| x_rotation(*p)).collect();
         let mut loss = 0.;
         let mut g = Array1::zeros(d + 1);
         let mut left_side = vec![C2x2::empty(); d + 1];
@@ -161,15 +157,15 @@ impl CpuComputeBackend {
             let r = u.get(0, 0) - f;
             loss += r.norm_sqr();
 
-            let pauli_z_i2 = C2x2::new([
-                [Complex64::new(0., 0.5), (0.).into()],
-                [(0.).into(), Complex64::new(0., -0.5).into()],
+            let pauli_x_i = C2x2::new([
+                [Complex64::ZERO, Complex64::I],
+                [Complex64::I, Complex64::ZERO],
             ]);
             for k in 0..d + 1 {
                 let m = if k == 0 {
-                    pauli_z_i2 * u
+                    pauli_x_i * u
                 } else {
-                    left_side[k - 1] * wx * pauli_z_i2 * r_z[k] * right_side[k]
+                    left_side[k - 1] * wx * pauli_x_i * r_z[k] * right_side[k]
                 };
                 g[k] += 2. * (r.conj() * m.get(0, 0)).re;
             }
@@ -182,10 +178,7 @@ impl ComputeBackend for CpuComputeBackend {
     fn evaluate_res_jac(&self, phases: &ArrayView1<f64>) -> (Array1<f64>, Array2<f64>) {
         use rayon::prelude::*;
 
-        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
-        let half_i = Complex64::new(0.0, 0.5);
-        let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
-        let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
+        let r_x: Vec<C2x2> = phases.iter().map(|p| x_rotation(*p)).collect();
 
         let (xs, ys) = self.target.xs_ys();
         let n = phases.len();
@@ -196,7 +189,7 @@ impl ComputeBackend for CpuComputeBackend {
             .zip(ys.par_iter())
             .map_init(
                 || PointScratch::new(n),
-                |scratch, (x, f)| self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch),
+                |scratch, (x, f)| self.eval_point(*x, *f, &r_x, scratch),
             )
             .collect();
 
@@ -224,24 +217,20 @@ impl ComputeBackend for CpuComputeBackend {
         }
         use rayon::prelude::*;
 
-        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
-        let half_i = Complex64::new(0.0, 0.5);
-        let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
-        let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
+        let r_x: Vec<C2x2> = phases.iter().map(|p| x_rotation(*p)).collect();
         let d = phases.len() - 1;
 
         let (xs, ys) = self.target.xs_ys();
 
         let n = d + 1;
 
-        // TODO: Use eval_point
         let (loss, g) = xs
             .par_iter()
             .zip(ys.par_iter())
             .map_init(
                 || PointScratch::new(n),
                 |scratch, (x, f)| {
-                    let r = self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch);
+                    let r = self.eval_point(*x, *f, &r_x, scratch);
                     (r.0.norm_sqr(), r.2)
                 },
             )
