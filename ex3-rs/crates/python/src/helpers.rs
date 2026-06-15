@@ -52,11 +52,11 @@ pub fn override_field<T>(dict: &Bound<'_, PyDict>, key: &str, slot: &mut T) -> P
 where
     T: for<'py> FromPyObject<'py>,
 {
-    let v = dict.get_item(key)?;
-    *slot = v
-        .extract::<T>()
-        .map_err(|e| PyValueError::new_err(format!("option {key}: {e}")))?;
-
+    if let Ok(v) = dict.get_item(key) {
+        *slot = v
+            .extract::<T>()
+            .map_err(|e| PyValueError::new_err(format!("option {key}: {e}")))?;
+    }
     Ok(())
 }
 
