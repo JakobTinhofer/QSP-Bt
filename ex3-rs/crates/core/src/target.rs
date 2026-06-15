@@ -106,7 +106,7 @@ pub struct TargetPoly {
     pub thetas: Array1<f64>,
     pattern: Option<TargetPattern>,
     parity: Option<Parity>,
-    pub distribution: Option<TargetDistribution>,
+    pub distribution_name: Option<String>,
 }
 
 impl TargetPoly {
@@ -141,7 +141,7 @@ impl TargetPoly {
             thetas,
             pattern: None,
             parity: None,
-            distribution: None,
+            distribution_name: None,
         }
     }
 
@@ -157,14 +157,14 @@ impl TargetPoly {
             thetas: Array1::zeros(2 * n_half),
             pattern: None,
             parity: Some(parity),
-            distribution: Some(dist),
+            distribution_name: Some(dist.name()),
         };
         let parity_sign = match parity {
             Parity::Even => 1.,
             Parity::Odd => -1.,
         };
         for i in 0..n_half {
-            let t = dist.theta_k(i + 1, n_half)?;
+            let t = dist.theta_m(i, n_half)?;
             s.thetas[n_half + i] = t;
             s.thetas[n_half - i - 1] = PI - t;
             s.xs[n_half + i] = t.cos();
@@ -187,36 +187,50 @@ impl TargetPoly {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TargetDistribution {
     Sqrt,
     Equidistant,
+    EquidistantGP { r: usize, k: usize },
+    Custom(Box<dyn Fn(f64) -> Result<f64>>),
 }
 
 impl TargetDistribution {
-    pub fn theta_k(&self, k: usize, n_half: usize) -> anyhow::Result<f64> {
-        anyhow::ensure!(k > 0 && k <= n_half, "Range for k: 1..N_HALF");
-        match self {
-            TargetDistribution::Sqrt => {
-                Ok((TargetDistribution::Equidistant.theta_k(k, n_half)? * (PI / 2.)).sqrt())
-            }
-            TargetDistribution::Equidistant => Ok(((k as f64) / ((n_half + 1) as f64)) * (PI / 2.)),
-        }
+    pub fn theta_m(&self, m: usize, n: usize) -> anyhow::Result<f64> {
+        self.theta_m_continuous(m as f64, n)
     }
 
-    pub fn theta_k_continuous(&self, k: f64, n_half: usize) -> anyhow::Result<f64> {
-        anyhow::ensure!(
-            k <= n_half as f64,
-            "Range for k (continuous): |k| <= N_HALF"
-        );
+    pub fn theta_m_continuous(&self, m: f64, n: usize) -> anyhow::Result<f64> {
         match self {
             TargetDistribution::Sqrt => Ok((TargetDistribution::Equidistant
-                .theta_k_continuous(k, n_half)?
+                .theta_m_continuous(m, n)?
                 * (PI / 2.))
                 .abs()
                 .sqrt()
-                * (if k >= 0. { 1. } else { -1. })),
-            TargetDistribution::Equidistant => Ok(k / ((n_half + 1) as f64) * (PI / 2.)),
+                * (if m >= 0. { 1. } else { -1. })),
+            TargetDistribution::Equidistant => {
+                anyhow::ensure!(
+                    m.abs() <= (n - 1) as f64,
+                    format!("Range for m: |m| <= n - 1, n={n} & m={m}")
+                );
+                Ok((m + 1.0) / ((n + 1) as f64) * (PI / 2.))
+            }
+            TargetDistribution::EquidistantGP { r, k } => {
+                anyhow::ensure!(
+                    m.abs() <= (*r - 1) as f64,
+                    format!("Range for m: |m| <= r-1, r={} & m={m}", *r)
+                );
+                Ok((PI / *r as f64) * ((m % n as f64) - *k as f64))
+            }
+            TargetDistribution::Custom(f) => f(m),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            TargetDistribution::Sqrt => String::from("Sqrt"),
+            TargetDistribution::Equidistant => String::from("Equidistant"),
+            TargetDistribution::Custom(_) => String::from("Custom"),
+            TargetDistribution::EquidistantGP { r, k } => format!("dist_GP({r},{k})"),
         }
     }
 }
@@ -225,11 +239,17 @@ impl FromStr for TargetDistribution {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
-        let trimmed = s.trim().to_lowercase();
-        match trimmed.as_str() {
-            "sqrt" | "jc" | "s" | "root" => Ok(Self::Sqrt),
-            "equidistant" | "e" | "perturbed" => Ok(Self::Equidistant),
-            _ => anyhow::bail!("Could not match string!"),
+        let trimmed = s.trim();
+
+        let parts: Vec<&str> = trimmed.split(",").collect();
+        match parts.as_slice() {
+            ["sqrt" | "jc" | "s" | "root"] => Ok(Self::Sqrt),
+            ["equidistant" | "e" | "perturbed"] => Ok(Self::Equidistant),
+            ["gp" | "equidistant_gp" | "egp", r, k] => Ok(Self::EquidistantGP {
+                r: r.parse()?,
+                k: k.parse()?,
+            }),
+            _ => anyhow::bail!("Could not match string to create TargetDistribution!"),
         }
     }
 }

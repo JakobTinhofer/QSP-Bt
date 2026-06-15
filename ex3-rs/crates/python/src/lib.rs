@@ -186,7 +186,7 @@ fn theta_k<'py>(
     dist: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let d = TargetDistribution::from_str(dist)?;
-    vectorize(py, k, |v| d.theta_k(v, n_half))
+    vectorize(py, k, |v| d.theta_m(v, n_half))
 }
 
 #[pyfunction]
@@ -198,7 +198,7 @@ fn theta_k_continuous<'py>(
     dist: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let d = TargetDistribution::from_str(dist)?;
-    vectorize(py, k, |v| d.theta_k_continuous(v, n_half))
+    vectorize(py, k, |v| d.theta_m_continuous(v, n_half))
 }
 
 #[pyfunction]
