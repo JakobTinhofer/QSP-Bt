@@ -179,7 +179,7 @@ fn solve_poly(
     dist="sqrt"
 )
 )]
-fn theta_k<'py>(
+fn theta_m<'py>(
     py: Python<'py>,
     k: &Bound<'py, PyAny>,
     n_half: usize,
@@ -191,7 +191,7 @@ fn theta_k<'py>(
 
 #[pyfunction]
 #[pyo3(signature=(k,n_half, dist="sqrt"))]
-fn theta_k_continuous<'py>(
+fn theta_m_continuous<'py>(
     py: Python<'py>,
     k: &Bound<'py, PyAny>,
     n_half: usize,
@@ -286,7 +286,7 @@ fn qsp_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(solve_poly_with_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(solve_poly, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_poly, m)?)?;
-    m.add_function(wrap_pyfunction!(theta_k, m)?)?;
-    m.add_function(wrap_pyfunction!(theta_k_continuous, m)?)?;
+    m.add_function(wrap_pyfunction!(theta_m, m)?)?;
+    m.add_function(wrap_pyfunction!(theta_m_continuous, m)?)?;
     Ok(())
 }
