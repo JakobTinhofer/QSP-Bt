@@ -3,159 +3,30 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ndarray::{Array1, arr1};
-use numpy::{Complex64, IntoPyArray, PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use ndarray::arr1;
+use numpy::{Complex64, PyReadonlyArray1};
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyComplex, PyDict};
+use pyo3::types::PyDict;
 
 use qsp_rs_core::compute::regularized::RidgeRegularizedBackend;
 use qsp_rs_core::compute::{Backend, ComputeBackend};
 use qsp_rs_core::solvers::configuration::{PhaseGenerator, PhaseMap, SolveMode};
 use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
-use qsp_rs_core::target::{
-    TargetDistribution, theta_k as theta_k_core, theta_k_continuous as theta_k_cont_core,
-};
+use qsp_rs_core::target::TargetDistribution;
 use qsp_rs_core::{
     compute::cpu::{BackendMode, CpuComputeBackend},
-    solvers::{SolveOutcome, Solver, TerminationReason, bfgs::BfgsOptions, lm::LmOptions},
+    solvers::{SolveOutcome, Solver},
     target::{Parity, TargetPattern, TargetPoly},
 };
 
+use crate::helpers::{build_bfgs, build_lm, phase_gen_from_pyobj, termination_str, vectorize};
 use crate::progress::PyObserver;
+use crate::types::{PySolveResult, PyTargetPoly};
 
+mod helpers;
 mod progress;
-
-#[pyclass(name = "TargetPoly", module = "qsp_rs", frozen)]
-#[derive(Debug, Clone)]
-pub struct PyTargetPoly {
-    xs: Array1<f64>,
-    ys: Array1<Complex64>,
-    #[pyo3(get)]
-    n_half: usize,
-}
-
-#[pymethods]
-impl PyTargetPoly {
-    #[getter]
-    fn xs<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.xs.clone().into_pyarray(py)
-    }
-
-    #[getter]
-    fn ys<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<Complex64>> {
-        self.ys.clone().into_pyarray(py)
-    }
-
-    #[getter]
-    fn ks<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<usize>> {
-        PyArray1::from_iter(py, 0..self.n_half)
-    }
-
-    #[getter]
-    fn thetas<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        PyArray1::from_iter(py, self.xs.iter().map(|x| x.acos()))
-    }
-}
-
-#[pyclass(name = "SolveResult", module = "qsp_rs", frozen)]
-pub struct PySolveResult {
-    #[pyo3(get)]
-    cost: f64,
-    phases: Array1<f64>,
-    #[pyo3(get)]
-    iterations: u64,
-    #[pyo3(get)]
-    termination: String,
-    #[pyo3(get)]
-    elapsed_ms: f64,
-    #[pyo3(get)]
-    target: PyTargetPoly,
-    #[pyo3(get)]
-    total_phase: f64,
-}
-
-#[pymethods]
-impl PySolveResult {
-    #[getter]
-    fn phases<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.phases.clone().into_pyarray(py)
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "SolveResult(cost={:.3e}, n_phases={}, total_phase={}, iterations={}, termination='{}', elapsed_ms={:.1})",
-            self.cost,
-            self.phases.len(),
-            self.total_phase,
-            self.iterations,
-            self.termination,
-            self.elapsed_ms,
-        )
-    }
-}
-
-fn termination_str(t: TerminationReason) -> &'static str {
-    match t {
-        TerminationReason::Converged => "converged",
-        TerminationReason::MaxItersReached => "max_iters_reached",
-        TerminationReason::LineSearchFailed => "line_search_failed",
-        TerminationReason::Diverged => "diverged",
-        TerminationReason::Other => "other",
-    }
-}
-
-fn override_field<T>(dict: &Bound<'_, PyDict>, key: &str, slot: &mut T) -> PyResult<()>
-where
-    T: for<'py> FromPyObject<'py>,
-{
-    if let Some(v) = dict.get_item(key)? {
-        *slot = v
-            .extract::<T>()
-            .map_err(|e| PyValueError::new_err(format!("option {key}: {e}")))?;
-    }
-    Ok(())
-}
-
-fn build_bfgs(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<BfgsOptions> {
-    let mut o = BfgsOptions::default();
-    if let Some(d) = overrides {
-        override_field(d, "max_iters", &mut o.max_iters)?;
-        override_field(d, "mem", &mut o.mem)?;
-        override_field(d, "tol_grad", &mut o.tol_grad)?;
-    }
-    Ok(o)
-}
-
-fn build_lm(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<LmOptions> {
-    let mut o = LmOptions::default();
-    if let Some(d) = overrides {
-        override_field(d, "max_iters", &mut o.max_iters)?;
-        override_field(d, "initial_lambda", &mut o.initial_lambda)?;
-        override_field(d, "tol", &mut o.tol)?;
-    }
-    Ok(o)
-}
-
-fn phase_gen_from_pyobj(obj: &Bound<'_, PyAny>) -> PyResult<PhaseGenerator> {
-    // 1) string
-    if let Ok(s) = obj.extract::<String>() {
-        return s
-            .parse::<PhaseGenerator>()
-            .map_err(|e| PyTypeError::new_err(format!("invalid PhaseGenerator string: {e}")));
-    }
-    // 2) real numpy float64 array
-    if let Ok(arr) = obj.extract::<PyReadonlyArray1<f64>>() {
-        return Ok(PhaseGenerator::Fixed(arr.as_array().to_owned()));
-    }
-    // 3) plain Python list/tuple of numbers -> Fixed
-    if let Ok(v) = obj.extract::<Vec<f64>>() {
-        return Ok(PhaseGenerator::Fixed(Array1::from_vec(v)));
-    }
-    Err(PyTypeError::new_err(
-        "expected a str, a 1-D float64 numpy array, or a sequence of floats",
-    ))
-}
+mod types;
 
 fn __solve(
     py: Python<'_>,
@@ -302,15 +173,32 @@ fn solve_poly(
 }
 
 #[pyfunction]
-#[pyo3(signature=(k,n_half))]
-fn theta_k(k: usize, n_half: usize) -> PyResult<f64> {
-    Ok(theta_k_core(k, n_half)?)
+#[pyo3(signature=(
+    k,
+    n_half,
+    dist="sqrt"
+)
+)]
+fn theta_k<'py>(
+    py: Python<'py>,
+    k: &Bound<'py, PyAny>,
+    n_half: usize,
+    dist: &str,
+) -> PyResult<Bound<'py, PyAny>> {
+    let d = TargetDistribution::from_str(dist)?;
+    vectorize(py, k, |v| d.theta_k(v, n_half))
 }
 
 #[pyfunction]
-#[pyo3(signature=(k,n_half))]
-fn theta_k_continuous(k: f64, n_half: usize) -> PyResult<f64> {
-    Ok(theta_k_cont_core(k, n_half)?)
+#[pyo3(signature=(k,n_half, dist="sqrt"))]
+fn theta_k_continuous<'py>(
+    py: Python<'py>,
+    k: &Bound<'py, PyAny>,
+    n_half: usize,
+    dist: &str,
+) -> PyResult<Bound<'py, PyAny>> {
+    let d = TargetDistribution::from_str(dist)?;
+    vectorize(py, k, |v| d.theta_k_continuous(v, n_half))
 }
 
 #[pyfunction]
@@ -385,26 +273,10 @@ fn evaluate_poly<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let phases_view = phases.as_array();
 
-    // check if argument is scalar (single x) or a numpy array of xs (vectorized)
-    if x.hasattr("__array__")? {
-        if let Ok(arr) = x.extract::<PyReadonlyArray1<'_, f64>>() {
-            return Ok(
-                CpuComputeBackend::evaluate_poly(&phases_view, &arr.as_array())
-                    .into_pyarray(py)
-                    .into_any(),
-            );
-        }
-    } else {
-        if let Ok(scalar_x) = x.extract::<f64>() {
-            let xs = arr1(&[scalar_x]);
-            let ys = CpuComputeBackend::evaluate_poly(&phases_view, &xs.view());
-            return Ok(PyComplex::from_doubles(py, ys[0].re, ys[0].im).into_any());
-        }
-    }
-
-    Err(PyTypeError::new_err(
-        "x must be a float or a 1-D numpy float64 array",
-    ))
+    vectorize::<_, _, _, anyhow::Error>(py, x, |v| {
+        let a = arr1(&[v]);
+        Ok(CpuComputeBackend::evaluate_poly(&phases_view, &a.view())[0])
+    })
 }
 
 #[pymodule]
