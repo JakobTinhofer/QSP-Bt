@@ -30,6 +30,10 @@ mod helpers;
 mod progress;
 mod types;
 
+// Add alongside your other core imports:
+//     use qsp_rs_core::target::Parity;
+// (SolveMode, PhaseMap, Backend, Solver, SolveOutcome, PhaseGenerator, etc. are already imported by __solve)
+
 fn __solve(
     py: Python<'_>,
     target: TargetPoly,
@@ -45,16 +49,20 @@ fn __solve(
     lm_options: Option<&Bound<'_, PyDict>>,
     progress: Option<&Bound<'_, PyAny>>,
     progress_interval_ms: u64,
+    rescale_to_err: Option<f64>, // NEW — Some(err): shrink to the smallest degree reaching `err`
 ) -> PyResult<PySolveResult> {
     let phase_map_p: PhaseMap = phase_map.parse()?;
     let backend_md: BackendMode = backend_mode.parse()?;
     let solve_mode = SolveMode::from_str(mode)?;
-
     let pytarget = PyTargetPoly {
         xs: target.xs.clone(),
         ys: target.ys.clone(),
         n_half: target.ys.len() / 2,
     };
+
+    // Read parity info BEFORE `target` is moved into the backend below. NEW
+    let target_parity = target.get_parity();
+    let target_all_real = target.all_real();
 
     let backend = match (regularize, &*backend_conv.trim().to_lowercase()) {
         (Some(lambda), "wz") => Backend::RidgeRegularizedWz(RidgeRegularizedBackend::new(
@@ -62,20 +70,17 @@ fn __solve(
             lambda,
         )),
         (None, "wz") => Backend::Wz(WzBackend::new(target, backend_md)),
-
         (Some(lambda), "wx") => Backend::RidgeRegularizedWx(RidgeRegularizedBackend::new(
             WxBackend::new(target, backend_md),
             lambda,
         )),
         (None, "wx") => Backend::Wx(WxBackend::new(target, backend_md)),
-
         _ => {
             return Err(PyValueError::new_err(format!(
                 "Unknown backend convention: {backend_conv}. May only be wx,wz"
             )));
         }
     };
-
     let solver_box: Box<dyn Solver<Backend>> = match solver.to_ascii_lowercase().as_str() {
         "bfgs" => Box::new(build_bfgs(bfgs_options)?),
         "lm" => Box::new(build_lm(lm_options)?),
@@ -90,11 +95,25 @@ fn __solve(
     ));
     let ctx = SolverContext::new(cancel, observer);
     let start = Instant::now();
-    // Release GIL while code is running
+
+    // GIL released for the whole run; the match picks single-solve vs. rescale search. NEW branch
     let outcome: anyhow::Result<SolveOutcome> = py.allow_threads(|| {
-        catch_unwind(AssertUnwindSafe(|| match seed {
-            Some(_) => solver_box.solve(&backend, &ctx, solve_mode, phase_map_p, phase_init),
-            None => solver_box.solve(&backend, &ctx, solve_mode, phase_map_p, phase_init),
+        catch_unwind(AssertUnwindSafe(|| match rescale_to_err {
+            Some(target_err) => solve_rescaled(
+                &backend,
+                &*solver_box,
+                &ctx,
+                solve_mode,
+                phase_map_p,
+                &phase_init,
+                target_parity,
+                target_all_real,
+                target_err,
+            ),
+            None => Ok(match seed {
+                Some(_) => solver_box.solve(&backend, &ctx, solve_mode, phase_map_p, phase_init),
+                None => solver_box.solve(&backend, &ctx, solve_mode, phase_map_p, phase_init),
+            }?),
         }))
         .map(|res| res.map_err(|e| e.into()))
         .unwrap_or_else(|panic_payload| {
@@ -109,7 +128,6 @@ fn __solve(
 
     let outcome = outcome.map_err(|e| PyRuntimeError::new_err(format!("{e:#}")))?;
     let elapsed_ms = start.elapsed().as_secs_f64() * 1e3;
-
     Ok(PySolveResult {
         cost: outcome.cost,
         phases: outcome.phases,
@@ -119,6 +137,99 @@ fn __solve(
         total_phase: outcome.phase_mag_sum,
         elapsed_ms,
     })
+}
+
+// ── rescale: smallest degree that reaches the requested error ───────────────
+//
+// Mirrors the CLI's ScalingBehaviorTask binary search, with two differences:
+//   * the ceiling is the degree already in `base_mode` — we only shrink, never
+//     grow — so a too-small mode is reported as an error instead of silently grown;
+//   * no avg_n averaging: one solve per candidate degree.
+//
+// Like the CLI, this assumes cost-vs-degree is monotone enough for a binary
+// search. It isn't guaranteed, so the result is "a small working degree", not
+// provably "the smallest".
+fn solve_rescaled(
+    backend: &Backend,
+    solver: &dyn Solver<Backend>,
+    ctx: &SolverContext,
+    base_mode: SolveMode,
+    phase_map: PhaseMap,
+    phase_init: &PhaseGenerator,
+    parity: Option<Parity>,
+    all_real: bool,
+    target_err: f64,
+) -> anyhow::Result<SolveOutcome> {
+    if !(target_err.is_finite() && target_err > 0.0) {
+        anyhow::bail!("rescale_to_err must be a finite positive number, got {target_err}");
+    }
+
+    let ceiling = mode_max_degree(base_mode);
+
+    let mut lower = 1usize; // inclusive
+    let mut upper = ceiling + 1; // exclusive — the +1 is what lets the search actually test `ceiling`
+    let mut best: Option<SolveOutcome> = None; // smallest degree that cleared the bar
+    let mut last_cost: Option<f64> = None; // most recent failing cost, for the error message
+
+    while lower < upper {
+        let mid = lower + (upper - lower) / 2;
+        // Solve at the parity-corrected degree, but move the search bounds on the
+        // raw `mid` — exactly as the CLI does.
+        let d = adjust_for_parity(mid, phase_map, parity, all_real);
+        let outcome = solver.solve(
+            backend,
+            ctx,
+            base_mode.rescale(d),
+            phase_map.clone(),
+            phase_init.clone(),
+        )?;
+
+        if outcome.cost < target_err {
+            upper = mid; // good enough → look smaller
+            best = Some(outcome);
+        } else {
+            lower = mid + 1; // too small → grow
+            last_cost = Some(outcome.cost);
+        }
+    }
+
+    best.ok_or_else(|| {
+        let reached = match last_cost {
+            Some(c) => format!(" (best cost reached: {c:e})"),
+            None => String::new(),
+        };
+        anyhow::anyhow!(
+            "rescale_to_err: the degree in the given mode (max degree {ceiling}) is too small to \
+             reach error {target_err:e}{reached}. Increase the mode's degree and retry."
+        )
+    })
+}
+
+/// Largest degree a mode will ever solve at — the binary-search ceiling.
+/// max() sidesteps the start/final field order in Hotstart/Cascade.
+fn mode_max_degree(mode: SolveMode) -> usize {
+    match mode {
+        SolveMode::Simple(d) => d,
+        SolveMode::Hotstart(a, b) | SolveMode::Cascade(a, b) => a.max(b),
+    }
+}
+
+/// QSP phase-sequence parity bump, mirroring the CLI. Mirror maps are exempt;
+/// otherwise an odd-parity target wants an odd degree (and vice versa), so bump
+/// by one when they disagree. Unknown target parity → no bump.
+fn adjust_for_parity(
+    d: usize,
+    phase_map: PhaseMap,
+    parity: Option<Parity>,
+    all_real: bool,
+) -> usize {
+    match (phase_map, all_real) {
+        (PhaseMap::Mirror, _) | (PhaseMap::MirrorIfPossible, true) => d,
+        _ => match (d % 2, parity) {
+            (0, Some(Parity::Odd)) | (1, Some(Parity::Even)) => d + 1,
+            _ => d,
+        },
+    }
 }
 
 #[pyfunction]
@@ -132,6 +243,7 @@ fn __solve(
     phase_map        = "mirror-if-possible",
     init             = PhaseGenerator::Random { magnitude: 0.4, seed: None },
     backend_mode     = "auto",
+    rescale_to_err   = None,
     backend_conv     = "wx",
     regularize       = None,
     seed             = None,
@@ -150,6 +262,7 @@ fn solve_poly(
     phase_map: &str,
     #[pyo3(from_py_with = "phase_gen_from_pyobj")] init: PhaseGenerator,
     backend_mode: &str,
+    rescale_to_err: Option<f64>,
     backend_conv: &str,
     regularize: Option<f64>,
     seed: Option<u64>,
@@ -187,6 +300,7 @@ fn solve_poly(
         lm_options,
         progress,
         progress_interval_ms,
+        rescale_to_err,
     )
 }
 
@@ -231,6 +345,7 @@ fn theta_m_continuous<'py>(
     phase_map        = "mirror-if-possible",
     init             = PhaseGenerator::Random { magnitude: 0.4, seed: None },
     backend_mode     = "auto",
+    rescale_to_err   = None,
     backend_conv     = "wx",
     regularize       = None,
     seed             = None,
@@ -250,6 +365,7 @@ fn solve_poly_with_pattern(
     phase_map: &str,
     #[pyo3(from_py_with = "phase_gen_from_pyobj")] init: PhaseGenerator,
     backend_mode: &str,
+    rescale_to_err: Option<f64>,
     backend_conv: &str,
     regularize: Option<f64>,
     seed: Option<u64>,
@@ -282,6 +398,7 @@ fn solve_poly_with_pattern(
         lm_options,
         progress,
         progress_interval_ms,
+        rescale_to_err,
     )
 }
 
