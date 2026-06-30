@@ -257,8 +257,8 @@ impl SolveMode {
             SolveMode::Hotstart(d1, d2) => {
                 SolveMode::Hotstart(((d1 as f64) / (d2 as f64) * (d as f64)) as usize, d)
             }
-            SolveMode::Cascade(s, d) => {
-                SolveMode::Cascade(((s as f64) / (d as f64) * (d as f64)) as usize, d)
+            SolveMode::Cascade(s, f) => {
+                SolveMode::Cascade(((s as f64) / (f as f64) * (d as f64)) as usize, d)
             }
         }
     }
