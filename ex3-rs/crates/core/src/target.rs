@@ -206,7 +206,7 @@ impl TargetDistribution {
                 * (PI / 2.))
                 .abs()
                 .sqrt()
-                * (if m >= 0. { 1. } else { -1. })),
+                * (if m >= -1. { 1. } else { -1. })),
             TargetDistribution::Equidistant => {
                 anyhow::ensure!(
                     m.abs() <= (n - 1) as f64,
