@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::bail;
 use ndarray::arr1;
 use numpy::{Complex64, PyReadonlyArray1};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -10,12 +11,13 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use qsp_rs_core::compute::regularized::RidgeRegularizedBackend;
-use qsp_rs_core::compute::{Backend, ComputeBackend};
+use qsp_rs_core::compute::wx::WxBackend;
+use qsp_rs_core::compute::wz::WzBackend;
+use qsp_rs_core::compute::{Backend, BackendMode, QspEvaluator};
 use qsp_rs_core::solvers::configuration::{PhaseGenerator, PhaseMap, SolveMode};
 use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
 use qsp_rs_core::target::TargetDistribution;
 use qsp_rs_core::{
-    compute::cpu::{BackendMode, CpuComputeBackend},
     solvers::{SolveOutcome, Solver},
     target::{Parity, TargetPattern, TargetPoly},
 };
@@ -36,6 +38,7 @@ fn __solve(
     phase_map: &str,
     phase_init: PhaseGenerator,
     backend_mode: &str,
+    backend_conv: &str,
     regularize: Option<f64>,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
@@ -53,12 +56,24 @@ fn __solve(
         n_half: target.ys.len() / 2,
     };
 
-    let backend = match regularize {
-        Some(lambda) => Backend::RidgeRegularized(RidgeRegularizedBackend::new(
-            CpuComputeBackend::new(target, backend_md),
+    let backend = match (regularize, &*backend_conv.trim().to_lowercase()) {
+        (Some(lambda), "wz") => Backend::RidgeRegularizedWz(RidgeRegularizedBackend::new(
+            WzBackend::new(target, backend_md),
             lambda,
         )),
-        None => Backend::Plain(CpuComputeBackend::new(target, backend_md)),
+        (None, "wz") => Backend::Wz(WzBackend::new(target, backend_md)),
+
+        (Some(lambda), "wx") => Backend::RidgeRegularizedWx(RidgeRegularizedBackend::new(
+            WxBackend::new(target, backend_md),
+            lambda,
+        )),
+        (None, "wx") => Backend::Wx(WxBackend::new(target, backend_md)),
+
+        _ => {
+            return Err(PyValueError::new_err(format!(
+                "Unknown backend convention: {backend_conv}. May only be wx,wz"
+            )));
+        }
     };
 
     let solver_box: Box<dyn Solver<Backend>> = match solver.to_ascii_lowercase().as_str() {
@@ -117,6 +132,7 @@ fn __solve(
     phase_map        = "mirror-if-possible",
     init             = PhaseGenerator::Random { magnitude: 0.4, seed: None },
     backend_mode     = "auto",
+    backend_conv     = "wx",
     regularize       = None,
     seed             = None,
     bfgs_options     = None,
@@ -134,6 +150,7 @@ fn solve_poly(
     phase_map: &str,
     #[pyo3(from_py_with = "phase_gen_from_pyobj")] init: PhaseGenerator,
     backend_mode: &str,
+    backend_conv: &str,
     regularize: Option<f64>,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
@@ -163,6 +180,7 @@ fn solve_poly(
         phase_map,
         init,
         backend_mode,
+        backend_conv,
         regularize,
         seed,
         bfgs_options,
@@ -213,6 +231,7 @@ fn theta_m_continuous<'py>(
     phase_map        = "mirror-if-possible",
     init             = PhaseGenerator::Random { magnitude: 0.4, seed: None },
     backend_mode     = "auto",
+    backend_conv     = "wx",
     regularize       = None,
     seed             = None,
     bfgs_options     = None,
@@ -231,6 +250,7 @@ fn solve_poly_with_pattern(
     phase_map: &str,
     #[pyo3(from_py_with = "phase_gen_from_pyobj")] init: PhaseGenerator,
     backend_mode: &str,
+    backend_conv: &str,
     regularize: Option<f64>,
     seed: Option<u64>,
     bfgs_options: Option<&Bound<'_, PyDict>>,
@@ -255,6 +275,7 @@ fn solve_poly_with_pattern(
         phase_map,
         init,
         backend_mode,
+        backend_conv,
         regularize,
         seed,
         bfgs_options,
@@ -265,17 +286,22 @@ fn solve_poly_with_pattern(
 }
 
 #[pyfunction]
-#[pyo3(signature = (phases, x, *))]
+#[pyo3(signature = (phases, x, backend_conv = "wx", *))]
 fn evaluate_poly<'py>(
     py: Python<'py>,
     phases: PyReadonlyArray1<'_, f64>,
     x: &Bound<'py, PyAny>,
+    backend_conv: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let phases_view = phases.as_array();
 
     vectorize::<_, _, _, anyhow::Error>(py, x, |v| {
         let a = arr1(&[v]);
-        Ok(CpuComputeBackend::evaluate_poly(&phases_view, &a.view())[0])
+        match &*backend_conv.trim().to_lowercase() {
+            "wx" => Ok(WxBackend::evaluate_poly(&phases_view, &a.view())[0]),
+            "wz" => Ok(WzBackend::evaluate_poly(&phases_view, &a.view())[0]),
+            _ => bail!("Unknown backend convention: {backend_conv}. May only be wx,wz"),
+        }
     })
 }
 

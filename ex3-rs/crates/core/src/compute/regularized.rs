@@ -1,6 +1,6 @@
 use ndarray::{Array1, Array2, ArrayView1, Axis, concatenate};
 
-use crate::compute::ComputeBackend;
+use crate::compute::{ComputeBackend, QspEvaluator};
 
 pub struct RidgeRegularizedBackend<T>
 where
@@ -60,15 +60,17 @@ impl<T: ComputeBackend> ComputeBackend for RidgeRegularizedBackend<T> {
         self.backend.evaluate_f(phases) + self.lambda * phase_sum(phases)
     }
 
+    fn get_target(&self) -> &crate::target::TargetPoly {
+        self.backend.get_target()
+    }
+}
+
+impl<T: ComputeBackend + QspEvaluator> QspEvaluator for RidgeRegularizedBackend<T> {
     fn evaluate_poly(
         phases: &ndarray::prelude::ArrayView1<f64>,
         xs: &ndarray::prelude::ArrayView1<f64>,
     ) -> ndarray::prelude::Array1<num_complex::Complex64> {
         T::evaluate_poly(phases, xs)
-    }
-
-    fn get_target(&self) -> &crate::target::TargetPoly {
-        self.backend.get_target()
     }
 }
 
@@ -100,14 +102,7 @@ mod tests {
             let (res, jac) = self.evaluate_res_jac(phases);
             (res.dot(&res), jac.t().dot(&res) * 2.0) // (f, 2 Jᵀr)
         }
-        // The regularization paths never call these two, so a panicking
-        // placeholder is fine — the tests never reach it.
-        fn evaluate_poly(
-            _phases: &ArrayView1<f64>,
-            _xs: &ArrayView1<f64>,
-        ) -> Array1<num_complex::Complex64> {
-            unimplemented!("not needed for these tests")
-        }
+
         fn get_target(&self) -> &crate::target::TargetPoly {
             unimplemented!("not needed for these tests")
         }

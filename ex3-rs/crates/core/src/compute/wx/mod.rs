@@ -1,0 +1,376 @@
+mod qsp_wx;
+
+use crate::compute::{
+    ComputeBackend, QspEvaluator,
+    wx::qsp_wx::{signal_operator, z_rotation},
+};
+use ndarray::{Array1, Array2, ArrayView1};
+use num_complex::{Complex64, ComplexFloat};
+use qsp_wx::qsp_poly;
+
+use crate::{
+    compute::{BackendMode, c2x2::C2x2},
+    target::TargetPoly,
+};
+
+pub struct WxBackend {
+    target: TargetPoly,
+    mode: BackendMode,
+}
+
+struct PointScratch {
+    left_side: Vec<C2x2>,
+    right_side: Vec<C2x2>,
+    m_pre: Vec<C2x2>,
+    m00s: Array1<Complex64>,
+    g_loc: Array1<f64>,
+}
+
+impl PointScratch {
+    pub fn new(n: usize) -> Self {
+        Self {
+            left_side: vec![C2x2::empty(); n],
+            right_side: vec![C2x2::empty(); n],
+            m_pre: vec![C2x2::empty(); n],
+            m00s: Array1::<Complex64>::zeros(n),
+            g_loc: Array1::<f64>::zeros(n),
+        }
+    }
+}
+
+impl WxBackend {
+    pub fn new(p: TargetPoly, mode: BackendMode) -> Self {
+        Self { target: p, mode }
+    }
+
+    #[inline(always)]
+    fn eval_point(
+        &self,
+        x: f64,
+        f: Complex64,
+        r_z: &[C2x2],
+        alphas: &[Complex64],
+        betas: &[Complex64],
+        scratch: &mut PointScratch,
+    ) -> (Complex64, Array1<Complex64>, Array1<f64>) {
+        let n = r_z.len();
+        let d = n - 1;
+        let s = (1.0 - x * x).max(0.0).sqrt();
+        let half_i = Complex64::new(0.0, 0.5);
+
+        let PointScratch {
+            left_side,
+            right_side,
+            m_pre,
+            m00s,
+            g_loc,
+        } = scratch;
+
+        for k in 1..=d {
+            let a = r_z[k].get(0, 0);
+            let b = r_z[k].get(1, 1);
+            m_pre[k] = C2x2::new([
+                [
+                    Complex64::new(x * a.re, x * a.im),
+                    Complex64::new(-s * b.im, s * b.re),
+                ],
+                [
+                    Complex64::new(-s * a.im, s * a.re),
+                    Complex64::new(x * b.re, x * b.im),
+                ],
+            ]);
+        }
+
+        left_side[0] = r_z[0];
+        right_side[d] = C2x2::eye();
+        for k in 1..=d {
+            left_side[k] = left_side[k - 1] * m_pre[k];
+            right_side[d - k] = m_pre[d - k + 1] * right_side[d - k + 1];
+        }
+
+        let u = left_side[d];
+        let r = u.get(0, 0) - f;
+        let r_conj = r.conj();
+
+        m00s[0] = half_i * u.get(0, 0);
+        g_loc[0] = 2.0 * (r_conj * m00s[0]).re;
+
+        for k in 1..=d {
+            let l00 = left_side[k - 1].get(0, 0);
+            let l01 = left_side[k - 1].get(0, 1);
+            let r00 = right_side[k].get(0, 0);
+            let r10 = right_side[k].get(1, 0);
+
+            let xl00 = Complex64::new(x * l00.re, x * l00.im);
+            let xl01 = Complex64::new(x * l01.re, x * l01.im);
+            let is_l00 = Complex64::new(-s * l00.im, s * l00.re);
+            let is_l01 = Complex64::new(-s * l01.im, s * l01.re);
+
+            let a_term = xl00 + is_l01;
+            let b_term = is_l00 + xl01;
+
+            m00s[k] = alphas[k] * r00 * a_term + betas[k] * r10 * b_term;
+            g_loc[k] = 2.0 * (r_conj * m00s[k]).re;
+        }
+
+        (r, m00s.clone(), g_loc.clone())
+    }
+
+    fn evaluate_both_st(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let d = phases.len() - 1;
+        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
+        let mut loss = 0.;
+        let mut g = Array1::zeros(d + 1);
+        let mut left_side = vec![C2x2::empty(); d + 1];
+        let mut right_side = vec![C2x2::empty(); d + 1];
+        for (x, f) in self.target.points_iter() {
+            let wx = signal_operator(*x);
+            left_side[0] = r_z[0];
+            right_side[d] = C2x2::eye();
+            for k in 1..d + 1 {
+                left_side[k] = left_side[k - 1] * wx * r_z[k];
+                right_side[d - k] = wx * r_z[d - k + 1] * right_side[d - k + 1];
+            }
+
+            let u = left_side[d];
+            let r = u.get(0, 0) - f;
+            loss += r.norm_sqr();
+
+            let pauli_z_i2 = C2x2::new([
+                [Complex64::new(0., 0.5), (0.).into()],
+                [(0.).into(), Complex64::new(0., -0.5).into()],
+            ]);
+            for k in 0..d + 1 {
+                let m = if k == 0 {
+                    pauli_z_i2 * u
+                } else {
+                    left_side[k - 1] * wx * pauli_z_i2 * r_z[k] * right_side[k]
+                };
+                g[k] += 2. * (r.conj() * m.get(0, 0)).re;
+            }
+        }
+        (loss, g)
+    }
+}
+
+impl ComputeBackend for WxBackend {
+    fn evaluate_res_jac(&self, phases: &ArrayView1<f64>) -> (Array1<f64>, Array2<f64>) {
+        use rayon::prelude::*;
+
+        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
+        let half_i = Complex64::new(0.0, 0.5);
+        let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
+        let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
+
+        let (xs, ys) = self.target.xs_ys();
+        let n = phases.len();
+        let n_points = self.target.xs.len();
+
+        let results: Vec<(Complex64, Array1<Complex64>, Array1<f64>)> = xs
+            .par_iter()
+            .zip(ys.par_iter())
+            .map_init(
+                || PointScratch::new(n),
+                |scratch, (x, f)| self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch),
+            )
+            .collect();
+
+        let mut residuals = Array1::<f64>::zeros(2 * n_points);
+        let mut jacobian = Array2::<f64>::zeros((2 * n_points, n));
+
+        for (p, (r, m00s, _)) in results.into_iter().enumerate() {
+            residuals[2 * p] = r.re;
+            residuals[2 * p + 1] = r.im;
+            for k in 0..n {
+                jacobian[[2 * p, k]] = m00s[k].re;
+                jacobian[[2 * p + 1, k]] = m00s[k].im;
+            }
+        }
+
+        (residuals, jacobian)
+    }
+
+    fn evaluate_f_grad(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
+        if self.mode == BackendMode::SingleThread
+            || self.mode == BackendMode::Auto
+                && (phases.len() <= 100 && self.target.xs.len() <= 100)
+        {
+            return self.evaluate_both_st(phases);
+        }
+        use rayon::prelude::*;
+
+        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
+        let half_i = Complex64::new(0.0, 0.5);
+        let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
+        let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
+        let d = phases.len() - 1;
+
+        let (xs, ys) = self.target.xs_ys();
+
+        let n = d + 1;
+
+        // TODO: Use eval_point
+        let (loss, g) = xs
+            .par_iter()
+            .zip(ys.par_iter())
+            .map_init(
+                || PointScratch::new(n),
+                |scratch, (x, f)| {
+                    let r = self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch);
+                    (r.0.norm_sqr(), r.2)
+                },
+            )
+            .reduce(
+                || (0.0_f64, Array1::<f64>::zeros(n)),
+                |(la, mut ga), (lb, gb)| {
+                    ga += &gb;
+                    (la + lb, ga)
+                },
+            );
+
+        (loss, g)
+    }
+
+    fn evaluate_f(&self, phases: &ArrayView1<f64>) -> f64 {
+        self.target
+            .points_iter()
+            .zip(
+                qsp_poly(
+                    phases.as_slice().unwrap(),
+                    self.target.xs.as_slice().unwrap(),
+                )
+                .iter(),
+            )
+            .map(|((_, y), p)| (p.re - y.re).powf(2.) + (p.im - y.im).powf(2.))
+            .sum()
+    }
+
+    fn get_target(&self) -> &TargetPoly {
+        &self.target
+    }
+}
+
+impl QspEvaluator for WxBackend {
+    fn evaluate_poly(phases: &ArrayView1<f64>, xs: &ArrayView1<f64>) -> Array1<Complex64> {
+        qsp_poly(phases.as_slice().unwrap(), xs.as_slice().unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::target::TargetPoly;
+    use ndarray::Array1;
+    use num_complex::Complex64;
+    use rand::{RngExt, SeedableRng, rngs::StdRng};
+    use std::f64::consts::PI;
+
+    /// Build a small deterministic backend for testing.
+    fn make_test_backend(i_count: usize) -> WxBackend {
+        let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
+        let xs: Array1<f64> = (0..i_count)
+            .map(|k| ((k as f64 + 0.5) / i_count as f64 * PI).cos())
+            .collect();
+        let ys: Array1<Complex64> = (0..i_count)
+            .map(|_| Complex64::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)))
+            .collect();
+        let target = TargetPoly::from_parts(xs, ys);
+        WxBackend::new(target, BackendMode::MultiThread)
+    }
+
+    fn random_phases(n: usize, seed: u64) -> Array1<f64> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        (0..n).map(|_| rng.random_range(0.0..2.0 * PI)).collect()
+    }
+
+    /// Test 1: new implementation matches the reference implementation.
+    #[test]
+    fn evaluate_both_matches_reference() {
+        let backend = make_test_backend(20);
+
+        // Run for a few different phase vector sizes and seeds
+        for &n in &[5_usize, 16, 50] {
+            for seed in 0u64..5 {
+                let phases = random_phases(n, seed);
+
+                let (loss_new, grad_new) = backend.evaluate_f_grad(&phases.view());
+                let (loss_ref, grad_ref) = backend.evaluate_both_st(&phases.view());
+
+                let loss_diff = (loss_new - loss_ref).abs();
+                let loss_rel = loss_diff / loss_ref.abs().max(1e-300);
+                assert!(
+                    loss_rel < 1e-12,
+                    "Loss mismatch at n={}, seed={}: new={:.16e}, ref={:.16e}, rel_err={:.2e}",
+                    n,
+                    seed,
+                    loss_new,
+                    loss_ref,
+                    loss_rel
+                );
+
+                for (k, (gn, gr)) in grad_new.iter().zip(grad_ref.iter()).enumerate() {
+                    let diff = (gn - gr).abs();
+                    let scale = gn.abs().max(gr.abs()).max(1e-12);
+                    let rel = diff / scale;
+                    assert!(
+                        rel < 1e-12,
+                        "Grad mismatch at n={}, seed={}, k={}: new={:.16e}, ref={:.16e}, rel_err={:.2e}",
+                        n,
+                        seed,
+                        k,
+                        gn,
+                        gr,
+                        rel
+                    );
+                }
+            }
+        }
+    }
+
+    /// Test 2: gradient agrees with central finite differences of evaluate_f.
+    /// This is independent of evaluate_both_reference and catches errors that
+    /// might exist in both implementations.
+    #[test]
+    fn gradient_matches_finite_differences() {
+        let backend = make_test_backend(15);
+
+        for &n in &[4_usize, 12] {
+            for seed in 0u64..3 {
+                let phases = random_phases(n, seed);
+                let (_, grad_analytic) = backend.evaluate_f_grad(&phases.view());
+
+                // Central differences: g[k] ≈ (f(phi + h*e_k) - f(phi - h*e_k)) / (2h)
+                // h chosen as compromise between truncation (O(h^2)) and roundoff (O(eps/h)).
+                let h = 1e-6;
+                for k in 0..n {
+                    let mut phi_plus = phases.clone();
+                    let mut phi_minus = phases.clone();
+                    phi_plus[k] += h;
+                    phi_minus[k] -= h;
+
+                    let f_plus = backend.evaluate_f(&phi_plus.view());
+                    let f_minus = backend.evaluate_f(&phi_minus.view());
+                    let g_numeric = (f_plus - f_minus) / (2.0 * h);
+
+                    let diff = (grad_analytic[k] - g_numeric).abs();
+                    let scale = grad_analytic[k].abs().max(g_numeric.abs()).max(1e-8);
+                    let rel = diff / scale;
+
+                    // Central differences with h=1e-6 give ~h^2 = 1e-12 truncation
+                    // error in the math, plus ~eps/h = 1e-10 roundoff. So tolerance
+                    // ~1e-7 is comfortable; tighter would risk false positives.
+                    assert!(
+                        rel < 1e-7,
+                        "FD gradient mismatch at n={}, seed={}, k={}: analytic={:.10e}, numeric={:.10e}, rel_err={:.2e}",
+                        n,
+                        seed,
+                        k,
+                        grad_analytic[k],
+                        g_numeric,
+                        rel
+                    );
+                }
+            }
+        }
+    }
+}

@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
 use anyhow::Result;
-use qsp_rs_core::{compute::cpu::BackendMode, solvers::SolveOutcome};
+use qsp_rs_core::{compute::BackendMode, solvers::SolveOutcome};
 use serde::{Deserialize, Serialize};
 
 const DATA_GUARD: &str = "--- DATA ---";

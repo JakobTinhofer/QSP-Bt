@@ -1,11 +1,11 @@
 use std::time::Instant;
 
-use crate::cli::{GREEN, RESET};
+use crate::cli::{GREEN, RESET, backend_from_convention_and_lambda};
 use crate::{cli::ProgramConfig, tasks::TaskTrait};
 use anyhow::Result;
 use clap::Args;
 use qsp_rs_core::compute::Backend;
-use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
+use qsp_rs_core::compute::BackendMode;
 use qsp_rs_core::solvers::SolveOutcome;
 use qsp_rs_core::solvers::configuration::PhaseMap;
 use qsp_rs_core::solvers::observe::SolverContext;
@@ -69,8 +69,10 @@ impl TaskTrait for PlotRuntimesTask {
                 current_degree
             );
 
-            let backend = Backend::match_regularization(
-                CpuComputeBackend::new(target, b),
+            let backend = backend_from_convention_and_lambda(
+                s.strategy.backend_convention,
+                target,
+                b,
                 s.strategy.regularization_lambda,
             );
 

@@ -4,14 +4,17 @@ use crate::tasks::TaskType;
 use clap::{Args as ClapArgs, Parser, ValueEnum};
 use ndarray::Array1;
 use qsp_rs_core::{
-    compute::{ComputeBackend, cpu::BackendMode},
+    compute::{
+        Backend, BackendMode, ComputeBackend, QspEvaluator, regularized::RidgeRegularizedBackend,
+        wx::WxBackend, wz::WzBackend,
+    },
     solvers::{
         Solver,
         bfgs::BfgsOptions,
         configuration::{PhaseGenerator, PhaseMap, SolveMode},
         lm::LmOptions,
     },
-    target::{Parity, TargetDistribution, TargetPattern},
+    target::{Parity, TargetDistribution, TargetPattern, TargetPoly},
 };
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +31,25 @@ pub enum PhaseMapArg {
     None,
     Mirror,
     MirrorIfPossible,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Serialize, Deserialize, Debug)]
+pub enum BackendConvention {
+    Wx,
+    Wz,
+}
+
+impl BackendConvention {
+    pub fn evaluate_poly(
+        &self,
+        phases: &ndarray::prelude::ArrayView1<f64>,
+        xs: &ndarray::prelude::ArrayView1<f64>,
+    ) -> Array1<num_complex::Complex64> {
+        match self {
+            BackendConvention::Wx => WxBackend::evaluate_poly(phases, xs),
+            BackendConvention::Wz => WzBackend::evaluate_poly(phases, xs),
+        }
+    }
 }
 
 impl From<PhaseMapArg> for PhaseMap {
@@ -70,6 +92,37 @@ pub struct SolverStrategy {
     /// Choose a magnitude similar to the error you want to achieve.
     #[arg(short = 'r', long)]
     pub regularization_lambda: Option<f64>,
+
+    #[arg(long, value_enum, default_value_t = BackendConvention::Wx)]
+    pub backend_convention: BackendConvention,
+}
+
+pub fn backend_from_convention_and_lambda(
+    conv: BackendConvention,
+    t: TargetPoly,
+    m: BackendMode,
+    l: Option<f64>,
+) -> Backend {
+    match conv {
+        BackendConvention::Wz => {
+            let b = WzBackend::new(t, m);
+            match l {
+                Some(lambda) => {
+                    Backend::RidgeRegularizedWz(RidgeRegularizedBackend::new(b, lambda))
+                }
+                None => Backend::Wz(b),
+            }
+        }
+        BackendConvention::Wx => {
+            let b = WxBackend::new(t, m);
+            match l {
+                Some(lambda) => {
+                    Backend::RidgeRegularizedWx(RidgeRegularizedBackend::new(b, lambda))
+                }
+                None => Backend::Wx(b),
+            }
+        }
+    }
 }
 
 /// What gets serialized to the file: only the relevant solver's params.

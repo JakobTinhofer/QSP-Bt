@@ -1,44 +1,17 @@
-pub mod c2x2;
-pub mod qsp;
-use std::str::FromStr;
-
+mod qsp_wz;
 use ndarray::{Array1, Array2, ArrayView1};
 use num_complex::{Complex64, ComplexFloat};
-use serde::{Deserialize, Serialize};
 
 use crate::{
     compute::{
-        ComputeBackend,
-        cpu::{
-            c2x2::C2x2,
-            qsp::{qsp_poly, x_rotation},
-        },
+        BackendMode, ComputeBackend, QspEvaluator,
+        c2x2::C2x2,
+        wz::qsp_wz::{qsp_poly, signal_operator, x_rotation},
     },
     target::TargetPoly,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BackendMode {
-    SingleThread,
-    MultiThread,
-    Auto,
-}
-
-impl FromStr for BackendMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let lower = s.trim().to_ascii_lowercase();
-        match lower.as_str() {
-            "single" | "single-thread" | "single_thread" | "s" => Ok(Self::SingleThread),
-            "multi" | "multi-thread" | "multi_thread" | "m" => Ok(Self::MultiThread),
-            "auto" | "a" => Ok(Self::Auto),
-            _ => anyhow::bail!(format!("Could not convert {s} into BackendMode type!")),
-        }
-    }
-}
-
-pub struct CpuComputeBackend {
+pub struct WzBackend {
     target: TargetPoly,
     mode: BackendMode,
 }
@@ -63,7 +36,7 @@ impl PointScratch {
     }
 }
 
-impl CpuComputeBackend {
+impl WzBackend {
     pub fn new(p: TargetPoly, mode: BackendMode) -> Self {
         Self { target: p, mode }
     }
@@ -145,7 +118,7 @@ impl CpuComputeBackend {
         let mut left_side = vec![C2x2::empty(); d + 1];
         let mut right_side = vec![C2x2::empty(); d + 1];
         for (x, f) in self.target.points_iter() {
-            let wx = qsp::signal_operator(*x);
+            let wx = signal_operator(*x);
             left_side[0] = r_z[0];
             right_side[d] = C2x2::eye();
             for k in 1..d + 1 {
@@ -174,7 +147,7 @@ impl CpuComputeBackend {
     }
 }
 
-impl ComputeBackend for CpuComputeBackend {
+impl ComputeBackend for WzBackend {
     fn evaluate_res_jac(&self, phases: &ArrayView1<f64>) -> (Array1<f64>, Array2<f64>) {
         use rayon::prelude::*;
 
@@ -262,7 +235,9 @@ impl ComputeBackend for CpuComputeBackend {
     fn get_target(&self) -> &TargetPoly {
         &self.target
     }
+}
 
+impl QspEvaluator for WzBackend {
     fn evaluate_poly(phases: &ArrayView1<f64>, xs: &ArrayView1<f64>) -> Array1<Complex64> {
         qsp_poly(phases.as_slice().unwrap(), xs.as_slice().unwrap())
     }
@@ -278,7 +253,7 @@ mod tests {
     use std::f64::consts::PI;
 
     /// Build a small deterministic backend for testing.
-    fn make_test_backend(i_count: usize) -> CpuComputeBackend {
+    fn make_test_backend(i_count: usize) -> WzBackend {
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let xs: Array1<f64> = (0..i_count)
             .map(|k| ((k as f64 + 0.5) / i_count as f64 * PI).cos())
@@ -287,7 +262,7 @@ mod tests {
             .map(|_| Complex64::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0)))
             .collect();
         let target = TargetPoly::from_parts(xs, ys);
-        CpuComputeBackend::new(target, BackendMode::MultiThread)
+        WzBackend::new(target, BackendMode::MultiThread)
     }
 
     fn random_phases(n: usize, seed: u64) -> Array1<f64> {

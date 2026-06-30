@@ -1,8 +1,11 @@
-use crate::{cli::ProgramConfig, tasks::TaskTrait};
+use crate::{
+    cli::{ProgramConfig, backend_from_convention_and_lambda},
+    tasks::TaskTrait,
+};
 use anyhow::Result;
 use clap::Args;
 use qsp_rs_core::{
-    compute::{Backend, cpu::CpuComputeBackend},
+    compute::Backend,
     solvers::{SolveOutcome, configuration::PhaseMap, observe::SolverContext},
     target::{Parity, TargetPoly},
 };
@@ -30,19 +33,18 @@ pub struct GetLeastPulsesTask {
 impl TaskTrait for GetLeastPulsesTask {
     fn execute(&self, cfg: ProgramConfig) -> Result<()> {
         let t = cfg.target;
-        let b = qsp_rs_core::compute::cpu::BackendMode::from(cfg.backend_mode);
+        let b = qsp_rs_core::compute::BackendMode::from(cfg.backend_mode);
         let s = cfg.solver;
 
-        let backend = Backend::match_regularization(
-            CpuComputeBackend::new(
-                TargetPoly::from_pattern(
-                    &t.target_pattern,
-                    Parity::from(t.parity),
-                    self.target_len,
-                    t.distribution.into(),
-                )?,
-                b,
-            ),
+        let backend = backend_from_convention_and_lambda(
+            s.strategy.backend_convention,
+            TargetPoly::from_pattern(
+                &t.target_pattern,
+                Parity::from(t.parity),
+                self.target_len,
+                t.distribution.into(),
+            )?,
+            b,
             s.strategy.regularization_lambda,
         );
 

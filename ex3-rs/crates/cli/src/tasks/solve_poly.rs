@@ -1,4 +1,4 @@
-use crate::cli::{BLUE, GREEN, RESET, format_array_real};
+use crate::cli::{BLUE, GREEN, RESET, backend_from_convention_and_lambda, format_array_real};
 
 use crate::data::datafile::{DataFileHeader, DataFileType};
 use crate::observe::CliObserver;
@@ -7,8 +7,8 @@ use anyhow::Result;
 use clap::Args;
 use ndarray::Array1;
 use qsp_rs_core::compute::Backend;
+use qsp_rs_core::compute::BackendMode;
 use qsp_rs_core::compute::ComputeBackend;
-use qsp_rs_core::compute::cpu::{BackendMode, CpuComputeBackend};
 use qsp_rs_core::solvers::SolveOutcome;
 use qsp_rs_core::solvers::configuration::PhaseMap;
 use qsp_rs_core::solvers::observe::{CancelToken, SolverContext};
@@ -34,16 +34,16 @@ pub struct SolvePolyTask {
 
 impl TaskTrait for SolvePolyTask {
     fn execute(&self, cfg: ProgramConfig) -> Result<()> {
-        let backend = Backend::match_regularization(
-            CpuComputeBackend::new(
-                TargetPoly::from_pattern(
-                    &cfg.target.target_pattern,
-                    Parity::from(cfg.target.parity),
-                    self.target_half_len,
-                    cfg.target.distribution.into(),
-                )?,
-                BackendMode::from(cfg.backend_mode),
-            ),
+        let conv = cfg.solver.strategy.backend_convention;
+        let backend = backend_from_convention_and_lambda(
+            conv,
+            TargetPoly::from_pattern(
+                &cfg.target.target_pattern,
+                Parity::from(cfg.target.parity),
+                self.target_half_len,
+                cfg.target.distribution.into(),
+            )?,
+            BackendMode::from(cfg.backend_mode),
             cfg.solver.strategy.regularization_lambda,
         );
 
@@ -122,7 +122,7 @@ impl TaskTrait for SolvePolyTask {
                 "# Plottable polynomial evaluation in x \\in (-1,1) with ~2k points (x,theta,Re[P], Im[P])"
             )?;
             let xs = Array1::linspace(-1., 1., 2000);
-            let px = CpuComputeBackend::evaluate_poly(&outcome.phases.view(), &xs.view());
+            let px = conv.evaluate_poly(&outcome.phases.view(), &xs.view());
             for (x, p) in xs.iter().zip(px.iter()) {
                 writeln!(file, "{} {} {} {}", x, x.acos(), p.re, p.im,)?;
             }

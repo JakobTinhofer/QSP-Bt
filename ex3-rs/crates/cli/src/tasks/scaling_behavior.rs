@@ -1,10 +1,7 @@
-use crate::cli::{BLUE, GREEN, PhaseMapArg, RESET, YELLOW};
+use crate::cli::{BLUE, GREEN, PhaseMapArg, RESET, YELLOW, backend_from_convention_and_lambda};
 use clap::Args;
 use qsp_rs_core::{
-    compute::{
-        Backend,
-        cpu::{BackendMode, CpuComputeBackend},
-    },
+    compute::{Backend, BackendMode},
     solvers::{configuration::PhaseMap, observe::SolverContext},
     target::{Parity, TargetPoly},
 };
@@ -68,8 +65,10 @@ impl TaskTrait for ScalingBehaviorTask {
                     current_target_length,
                     t.distribution.into(),
                 )?;
-                let backend = Backend::match_regularization(
-                    CpuComputeBackend::new(target, b),
+                let backend = backend_from_convention_and_lambda(
+                    s.strategy.backend_convention,
+                    target,
+                    b,
                     s.strategy.regularization_lambda,
                 );
                 let mode = s.strategy.mode.rescale(parity_adjusted_d);
