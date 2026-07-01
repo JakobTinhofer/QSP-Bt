@@ -1,26 +1,22 @@
 use ndarray::Array1;
 use num_complex::Complex64;
 
-use crate::compute::c2x2::C2x2;
+use crate::compute::c2x2::{C2x2, Su2};
 
 #[inline(always)]
-pub fn signal_operator(x: f64) -> C2x2 {
+pub fn signal_operator(x: f64) -> Su2 {
     let s = (1.0 - x * x).max(0.0).sqrt();
-    C2x2::new([
-        [x.into(), Complex64::new(0., s)],
-        [Complex64::new(0., s), x.into()],
-    ])
+    Su2::from_ab(x.into(), Complex64::new(0., s))
 }
 #[inline(always)]
-pub fn z_rotation(phi: f64) -> C2x2 {
+pub fn z_rotation(phi: f64) -> Su2 {
     let h = phi * 0.5;
     let (s, c) = h.sin_cos();
-    let z_pos = Complex64::new(c, s);
-    let z_neg = Complex64::new(c, -s);
-    C2x2::new([[z_pos, Complex64::ZERO], [Complex64::ZERO, z_neg]])
+    let z = Complex64::new(c, s);
+    Su2::from_ab(z, (0.).into())
 }
 
-pub fn qsp_unitary(phases: &[f64], x: f64) -> C2x2 {
+pub fn qsp_unitary(phases: &[f64], x: f64) -> Su2 {
     assert!(x >= -1. && x <= 1., "x may only be in [-1,1]! Got {}", x);
     assert!(phases.len() > 1, "need at least 2 phases!");
     let mut u = z_rotation(phases[0]);
@@ -42,6 +38,8 @@ mod tests {
 
     use rand::distr::{Distribution, Uniform};
 
+    use crate::compute::c2x2::C2x2;
+
     use super::*;
 
     #[test]
@@ -53,7 +51,7 @@ mod tests {
         let x_dist = Uniform::new(-1., 1.).expect("Failed to create random distribution!");
         let t_dist = Uniform::new(0., 2. * PI).expect("Failed to create random distribution!");
         let mut rng = rand::rng();
-        let i = C2x2::eye();
+        let i = Su2::eye();
         let max_dev = (0..nr_tests)
             .map(|_| {
                 let x = x_dist.sample(&mut rng);

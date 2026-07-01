@@ -2,16 +2,14 @@ mod qsp_wx;
 
 use crate::compute::{
     ComputeBackend, QspEvaluator,
+    c2x2::{C2x2, Su2},
     wx::qsp_wx::{signal_operator, z_rotation},
 };
 use ndarray::{Array1, Array2, ArrayView1};
 use num_complex::{Complex64, ComplexFloat};
 use qsp_wx::qsp_poly;
 
-use crate::{
-    compute::{BackendMode, c2x2::C2x2},
-    target::TargetPoly,
-};
+use crate::{compute::BackendMode, target::TargetPoly};
 
 pub struct WxBackend {
     target: TargetPoly,
@@ -19,9 +17,9 @@ pub struct WxBackend {
 }
 
 struct PointScratch {
-    left_side: Vec<C2x2>,
-    right_side: Vec<C2x2>,
-    m_pre: Vec<C2x2>,
+    left_side: Vec<Su2>,
+    right_side: Vec<Su2>,
+    m_pre: Vec<Su2>,
     m00s: Array1<Complex64>,
     g_loc: Array1<f64>,
 }
@@ -29,9 +27,9 @@ struct PointScratch {
 impl PointScratch {
     pub fn new(n: usize) -> Self {
         Self {
-            left_side: vec![C2x2::empty(); n],
-            right_side: vec![C2x2::empty(); n],
-            m_pre: vec![C2x2::empty(); n],
+            left_side: vec![Su2::eye(); n],
+            right_side: vec![Su2::eye(); n],
+            m_pre: vec![Su2::eye(); n],
             m00s: Array1::<Complex64>::zeros(n),
             g_loc: Array1::<f64>::zeros(n),
         }
@@ -48,14 +46,15 @@ impl WxBackend {
         &self,
         x: f64,
         f: Complex64,
-        r_z: &[C2x2],
+        r_z: &[Su2],
         alphas: &[Complex64],
         betas: &[Complex64],
         scratch: &mut PointScratch,
-    ) -> (Complex64, Array1<Complex64>, Array1<f64>) {
+    ) -> Complex64 {
         let n = r_z.len();
         let d = n - 1;
         let s = (1.0 - x * x).max(0.0).sqrt();
+        let is = Complex64::new(0.0, s);
         let half_i = Complex64::new(0.0, 0.5);
 
         let PointScratch {
@@ -67,44 +66,36 @@ impl WxBackend {
         } = scratch;
 
         for k in 1..=d {
-            let a = r_z[k].get(0, 0);
-            let b = r_z[k].get(1, 1);
-            m_pre[k] = C2x2::new([
-                [
-                    Complex64::new(x * a.re, x * a.im),
-                    Complex64::new(-s * b.im, s * b.re),
-                ],
-                [
-                    Complex64::new(-s * a.im, s * a.re),
-                    Complex64::new(x * b.re, x * b.im),
-                ],
-            ]);
+            let z = r_z[k].get_direct::<0, 0>();
+            let z_bar = r_z[k].get_direct::<1, 1>();
+            m_pre[k] = Su2::from_ab(x * z, is * z_bar);
         }
 
         left_side[0] = r_z[0];
-        right_side[d] = C2x2::eye();
+        right_side[d] = Su2::eye();
         for k in 1..=d {
             left_side[k] = left_side[k - 1] * m_pre[k];
             right_side[d - k] = m_pre[d - k + 1] * right_side[d - k + 1];
         }
 
         let u = left_side[d];
-        let r = u.get(0, 0) - f;
+        let r = u.get_direct::<0, 0>() - f;
         let r_conj = r.conj();
 
-        m00s[0] = half_i * u.get(0, 0);
+        // ∂U₀₀/∂φ₀ via the (i/2)·Z derivative factor on the leftmost rotation.
+        m00s[0] = half_i * u.get_direct::<0, 0>();
         g_loc[0] = 2.0 * (r_conj * m00s[0]).re;
 
         for k in 1..=d {
-            let l00 = left_side[k - 1].get(0, 0);
-            let l01 = left_side[k - 1].get(0, 1);
-            let r00 = right_side[k].get(0, 0);
-            let r10 = right_side[k].get(1, 0);
+            let l00 = left_side[k - 1].get_direct::<0, 0>();
+            let l01 = left_side[k - 1].get_direct::<0, 1>();
+            let r00 = right_side[k].get_direct::<0, 0>();
+            let r10 = right_side[k].get_direct::<1, 0>();
 
-            let xl00 = Complex64::new(x * l00.re, x * l00.im);
-            let xl01 = Complex64::new(x * l01.re, x * l01.im);
-            let is_l00 = Complex64::new(-s * l00.im, s * l00.re);
-            let is_l01 = Complex64::new(-s * l01.im, s * l01.re);
+            let xl00 = x * l00;
+            let xl01 = x * l01;
+            let is_l00 = is * l00;
+            let is_l01 = is * l01;
 
             let a_term = xl00 + is_l01;
             let b_term = is_l00 + xl01;
@@ -113,20 +104,19 @@ impl WxBackend {
             g_loc[k] = 2.0 * (r_conj * m00s[k]).re;
         }
 
-        (r, m00s.clone(), g_loc.clone())
+        r
     }
 
     fn evaluate_both_st(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
         let d = phases.len() - 1;
-        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
+        let r_z: Vec<Su2> = phases.iter().map(|p| z_rotation(*p)).collect();
         let mut loss = 0.;
         let mut g = Array1::zeros(d + 1);
-        let mut left_side = vec![C2x2::empty(); d + 1];
-        let mut right_side = vec![C2x2::empty(); d + 1];
+        let mut left_side = vec![Su2::eye(); d + 1];
+        let mut right_side = vec![Su2::eye(); d + 1];
         for (x, f) in self.target.points_iter() {
             let wx = signal_operator(*x);
             left_side[0] = r_z[0];
-            right_side[d] = C2x2::eye();
             for k in 1..d + 1 {
                 left_side[k] = left_side[k - 1] * wx * r_z[k];
                 right_side[d - k] = wx * r_z[d - k + 1] * right_side[d - k + 1];
@@ -136,10 +126,7 @@ impl WxBackend {
             let r = u.get(0, 0) - f;
             loss += r.norm_sqr();
 
-            let pauli_z_i2 = C2x2::new([
-                [Complex64::new(0., 0.5), (0.).into()],
-                [(0.).into(), Complex64::new(0., -0.5).into()],
-            ]);
+            let pauli_z_i2 = Su2::from_ab(Complex64::new(0., 0.5), (0.).into());
             for k in 0..d + 1 {
                 let m = if k == 0 {
                     pauli_z_i2 * u
@@ -157,7 +144,7 @@ impl ComputeBackend for WxBackend {
     fn evaluate_res_jac(&self, phases: &ArrayView1<f64>) -> (Array1<f64>, Array2<f64>) {
         use rayon::prelude::*;
 
-        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
+        let r_z: Vec<Su2> = phases.iter().map(|p| z_rotation(*p)).collect();
         let half_i = Complex64::new(0.0, 0.5);
         let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
         let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
@@ -166,19 +153,22 @@ impl ComputeBackend for WxBackend {
         let n = phases.len();
         let n_points = self.target.xs.len();
 
-        let results: Vec<(Complex64, Array1<Complex64>, Array1<f64>)> = xs
+        let results: Vec<(Complex64, Array1<Complex64>)> = xs
             .par_iter()
             .zip(ys.par_iter())
             .map_init(
                 || PointScratch::new(n),
-                |scratch, (x, f)| self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch),
+                |scratch, (x, f)| {
+                    let r = self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch);
+                    (r, scratch.m00s.clone())
+                },
             )
             .collect();
 
         let mut residuals = Array1::<f64>::zeros(2 * n_points);
         let mut jacobian = Array2::<f64>::zeros((2 * n_points, n));
 
-        for (p, (r, m00s, _)) in results.into_iter().enumerate() {
+        for (p, (r, m00s)) in results.into_iter().enumerate() {
             residuals[2 * p] = r.re;
             residuals[2 * p + 1] = r.im;
             for k in 0..n {
@@ -199,27 +189,37 @@ impl ComputeBackend for WxBackend {
         }
         use rayon::prelude::*;
 
-        let r_z: Vec<C2x2> = phases.iter().map(|p| z_rotation(*p)).collect();
+        let r_z: Vec<Su2> = phases.iter().map(|p| z_rotation(*p)).collect();
         let half_i = Complex64::new(0.0, 0.5);
         let alphas: Vec<Complex64> = r_z.iter().map(|rz| half_i * rz.get(0, 0)).collect();
         let betas: Vec<Complex64> = r_z.iter().map(|rz| -half_i * rz.get(1, 1)).collect();
-        let d = phases.len() - 1;
+        let n = phases.len();
 
         let (xs, ys) = self.target.xs_ys();
+        let n_points = xs.len();
 
-        let n = d + 1;
+        // One PointScratch per chunk, one chunk per thread → the scratch buffers
+        // are allocated+zeroed ~once per thread for the whole gradient, instead
+        // of once per Rayon work-split (the fold identity) or once per point (the
+        // old clones). Inner loop is sequential, so each chunk uses its scratch
+        // for all its points.
+        let n_chunks = rayon::current_num_threads().max(1);
+        let chunk = n_points.div_ceil(n_chunks); // fallback: (n_points + n_chunks - 1) / n_chunks
 
-        // TODO: Use eval_point
-        let (loss, g) = xs
-            .par_iter()
-            .zip(ys.par_iter())
-            .map_init(
-                || PointScratch::new(n),
-                |scratch, (x, f)| {
-                    let r = self.eval_point(*x, *f, &r_z, &alphas, &betas, scratch);
-                    (r.0.norm_sqr(), r.2)
-                },
-            )
+        let (loss, grad) = xs
+            .par_chunks(chunk)
+            .zip(ys.par_chunks(chunk))
+            .map(|(xc, yc)| {
+                let mut scratch = PointScratch::new(n);
+                let mut grad = Array1::<f64>::zeros(n);
+                let mut loss = 0.0_f64;
+                for (x, f) in xc.iter().zip(yc.iter()) {
+                    let r = self.eval_point(*x, *f, &r_z, &alphas, &betas, &mut scratch);
+                    loss += r.norm_sqr();
+                    grad += &scratch.g_loc; // in-place, no allocation
+                }
+                (loss, grad)
+            })
             .reduce(
                 || (0.0_f64, Array1::<f64>::zeros(n)),
                 |(la, mut ga), (lb, gb)| {
@@ -228,7 +228,7 @@ impl ComputeBackend for WxBackend {
                 },
             );
 
-        (loss, g)
+        (loss, grad)
     }
 
     fn evaluate_f(&self, phases: &ArrayView1<f64>) -> f64 {

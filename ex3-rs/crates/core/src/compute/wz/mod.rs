@@ -5,7 +5,7 @@ use num_complex::{Complex64, ComplexFloat};
 use crate::{
     compute::{
         BackendMode, ComputeBackend, QspEvaluator,
-        c2x2::C2x2,
+        c2x2::{C2x2, DenseC2x2, Su2},
         wz::qsp_wz::{qsp_poly, signal_operator, x_rotation},
     },
     target::TargetPoly,
@@ -17,9 +17,9 @@ pub struct WzBackend {
 }
 
 struct PointScratch {
-    left_side: Vec<C2x2>,
-    right_side: Vec<C2x2>,
-    m_pre: Vec<C2x2>,
+    left_side: Vec<Su2>,
+    right_side: Vec<Su2>,
+    m_pre: Vec<Su2>,
     m00s: Array1<Complex64>,
     g_loc: Array1<f64>,
 }
@@ -27,9 +27,9 @@ struct PointScratch {
 impl PointScratch {
     pub fn new(n: usize) -> Self {
         Self {
-            left_side: vec![C2x2::empty(); n],
-            right_side: vec![C2x2::empty(); n],
-            m_pre: vec![C2x2::empty(); n],
+            left_side: vec![Su2::eye(); n],
+            right_side: vec![Su2::eye(); n],
+            m_pre: vec![Su2::eye(); n],
             m00s: Array1::<Complex64>::zeros(n),
             g_loc: Array1::<f64>::zeros(n),
         }
@@ -46,9 +46,9 @@ impl WzBackend {
         &self,
         x: f64,
         f: Complex64,
-        p_x: &[C2x2],
+        p_x: &[Su2],
         scratch: &mut PointScratch,
-    ) -> (Complex64, Array1<Complex64>, Array1<f64>) {
+    ) -> Complex64 {
         let n = p_x.len();
         let d = n - 1;
         let s = (1.0 - x * x).max(0.0).sqrt();
@@ -70,11 +70,11 @@ impl WzBackend {
         for k in 1..=d {
             let p = p_x[k].get(0, 0); // cos(φ_k/2)
             let q = p_x[k].get(0, 1); // i·sin(φ_k/2)
-            m_pre[k] = C2x2::new([[xp * p, xp * q], [xm * q, xm * p]]);
+            m_pre[k] = Su2::from_ab(xp * p, xp * q);
         }
 
         left_side[0] = p_x[0];
-        right_side[d] = C2x2::eye();
+        right_side[d] = Su2::eye();
         for k in 1..=d {
             left_side[k] = left_side[k - 1] * m_pre[k];
             right_side[d - k] = m_pre[d - k + 1] * right_side[d - k + 1];
@@ -107,20 +107,19 @@ impl WzBackend {
             g_loc[k] = 2.0 * (r_conj * m00s[k]).re;
         }
 
-        (r, m00s.clone(), g_loc.clone())
+        r
     }
 
     fn evaluate_both_st(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
         let d = phases.len() - 1;
-        let r_z: Vec<C2x2> = phases.iter().map(|p| x_rotation(*p)).collect();
+        let r_z: Vec<Su2> = phases.iter().map(|p| x_rotation(*p)).collect();
         let mut loss = 0.;
         let mut g = Array1::zeros(d + 1);
-        let mut left_side = vec![C2x2::empty(); d + 1];
-        let mut right_side = vec![C2x2::empty(); d + 1];
+        let mut left_side = vec![Su2::eye(); d + 1];
+        let mut right_side = vec![Su2::eye(); d + 1];
         for (x, f) in self.target.points_iter() {
             let wx = signal_operator(*x);
             left_side[0] = r_z[0];
-            right_side[d] = C2x2::eye();
             for k in 1..d + 1 {
                 left_side[k] = left_side[k - 1] * wx * r_z[k];
                 right_side[d - k] = wx * r_z[d - k + 1] * right_side[d - k + 1];
@@ -130,7 +129,7 @@ impl WzBackend {
             let r = u.get(0, 0) - f;
             loss += r.norm_sqr();
 
-            let pauli_x_i = C2x2::new([
+            let pauli_x_i = DenseC2x2::new([
                 [Complex64::ZERO, Complex64::I],
                 [Complex64::I, Complex64::ZERO],
             ]);
@@ -148,39 +147,6 @@ impl WzBackend {
 }
 
 impl ComputeBackend for WzBackend {
-    fn evaluate_res_jac(&self, phases: &ArrayView1<f64>) -> (Array1<f64>, Array2<f64>) {
-        use rayon::prelude::*;
-
-        let r_x: Vec<C2x2> = phases.iter().map(|p| x_rotation(*p)).collect();
-
-        let (xs, ys) = self.target.xs_ys();
-        let n = phases.len();
-        let n_points = self.target.xs.len();
-
-        let results: Vec<(Complex64, Array1<Complex64>, Array1<f64>)> = xs
-            .par_iter()
-            .zip(ys.par_iter())
-            .map_init(
-                || PointScratch::new(n),
-                |scratch, (x, f)| self.eval_point(*x, *f, &r_x, scratch),
-            )
-            .collect();
-
-        let mut residuals = Array1::<f64>::zeros(2 * n_points);
-        let mut jacobian = Array2::<f64>::zeros((2 * n_points, n));
-
-        for (p, (r, m00s, _)) in results.into_iter().enumerate() {
-            residuals[2 * p] = r.re;
-            residuals[2 * p + 1] = r.im;
-            for k in 0..n {
-                jacobian[[2 * p, k]] = m00s[k].re;
-                jacobian[[2 * p + 1, k]] = m00s[k].im;
-            }
-        }
-
-        (residuals, jacobian)
-    }
-
     fn evaluate_f_grad(&self, phases: &ArrayView1<f64>) -> (f64, Array1<f64>) {
         if self.mode == BackendMode::SingleThread
             || self.mode == BackendMode::Auto
@@ -190,23 +156,29 @@ impl ComputeBackend for WzBackend {
         }
         use rayon::prelude::*;
 
-        let r_x: Vec<C2x2> = phases.iter().map(|p| x_rotation(*p)).collect();
-        let d = phases.len() - 1;
+        let r_x: Vec<Su2> = phases.iter().map(|p| x_rotation(*p)).collect();
+        let n = phases.len();
 
         let (xs, ys) = self.target.xs_ys();
+        let n_points = xs.len();
 
-        let n = d + 1;
+        let n_chunks = rayon::current_num_threads().max(1);
+        let chunk = n_points.div_ceil(n_chunks);
 
-        let (loss, g) = xs
-            .par_iter()
-            .zip(ys.par_iter())
-            .map_init(
-                || PointScratch::new(n),
-                |scratch, (x, f)| {
-                    let r = self.eval_point(*x, *f, &r_x, scratch);
-                    (r.0.norm_sqr(), r.2)
-                },
-            )
+        let (loss, grad) = xs
+            .par_chunks(chunk)
+            .zip(ys.par_chunks(chunk))
+            .map(|(xc, yc)| {
+                let mut scratch = PointScratch::new(n);
+                let mut grad = Array1::<f64>::zeros(n);
+                let mut loss = 0.0_f64;
+                for (x, f) in xc.iter().zip(yc.iter()) {
+                    let r = self.eval_point(*x, *f, &r_x, &mut scratch);
+                    loss += r.norm_sqr();
+                    grad += &scratch.g_loc;
+                }
+                (loss, grad)
+            })
             .reduce(
                 || (0.0_f64, Array1::<f64>::zeros(n)),
                 |(la, mut ga), (lb, gb)| {
@@ -215,7 +187,43 @@ impl ComputeBackend for WzBackend {
                 },
             );
 
-        (loss, g)
+        (loss, grad)
+    }
+
+    fn evaluate_res_jac(&self, phases: &ArrayView1<f64>) -> (Array1<f64>, Array2<f64>) {
+        use rayon::prelude::*;
+
+        let r_x: Vec<Su2> = phases.iter().map(|p| x_rotation(*p)).collect();
+
+        let (xs, ys) = self.target.xs_ys();
+        let n = phases.len();
+        let n_points = self.target.xs.len();
+
+        let results: Vec<(Complex64, Array1<Complex64>)> = xs
+            .par_iter()
+            .zip(ys.par_iter())
+            .map_init(
+                || PointScratch::new(n),
+                |scratch, (x, f)| {
+                    let r = self.eval_point(*x, *f, &r_x, scratch);
+                    (r, scratch.m00s.clone())
+                },
+            )
+            .collect();
+
+        let mut residuals = Array1::<f64>::zeros(2 * n_points);
+        let mut jacobian = Array2::<f64>::zeros((2 * n_points, n));
+
+        for (p, (r, m00s)) in results.into_iter().enumerate() {
+            residuals[2 * p] = r.re;
+            residuals[2 * p + 1] = r.im;
+            for k in 0..n {
+                jacobian[[2 * p, k]] = m00s[k].re;
+                jacobian[[2 * p + 1, k]] = m00s[k].im;
+            }
+        }
+
+        (residuals, jacobian)
     }
 
     fn evaluate_f(&self, phases: &ArrayView1<f64>) -> f64 {
